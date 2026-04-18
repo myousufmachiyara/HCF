@@ -59,7 +59,6 @@
                   <th>S.No</th>
                   <th>Item</th>
                   <th>Variation</th>
-                  <th>Location</th>
                   <th>Quantity</th>
                   <th>Unit</th>
                   <th>Price</th>
@@ -85,14 +84,7 @@
                     <select name="items[0][variation_id]" id="variation1" class="form-control select2-js variation-select">
                       <option value="">Select Variation</option>
                     </select>
-                  </td>
-                  <td>
-                    <select name="items[0][location_id]" id="location1" class="form-control select2-js" required>
-                      @foreach ($locations as $loc)
-                        <option value="{{ $loc->id }}">{{ $loc->name }}</option>
-                      @endforeach
-                    </select>
-                  </td>                 
+                  </td>              
                   <td><input type="number" name="items[0][quantity]" id="pur_qty1" class="form-control quantity" value="0" step="any" onchange="rowTotal(1)"></td>
                   <td>
                     <select name="items[0][unit]" id="unit1" class="form-control" required>
@@ -145,7 +137,6 @@
 
 <script>
   var products = @json($products);
-  let locations = @json($locations); // Ensure this is passed from Controller
   var index = 2;
 
   $(document).ready(function () {
@@ -193,11 +184,6 @@
           <td>
             <select name="items[${rowIndex}][variation_id]" id="variation${index}" class="form-control select2-js variation-select">
               <option value="">Select Variation</option>
-            </select>
-          </td>
-          <td>
-            <select name="items[${rowIndex}][location_id]" id="location${index}" class="form-control select2-js" required>
-              ${locations.map(loc => `<option value="${loc.id}">${loc.name}</option>`).join('')}
             </select>
           </td>
           <td><input type="number" name="items[${rowIndex}][quantity]" id="pur_qty${index}" class="form-control quantity" value="0" step="any" onchange="rowTotal(${index})"></td>

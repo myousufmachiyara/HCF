@@ -58,7 +58,6 @@
                   <th>S.No</th>
                   <th>Item</th>
                   <th>Variation</th>
-                  <th>Location</th>
                   <th>Quantity</th>
                   <th>Unit</th>
                   <th>Price</th>
@@ -90,13 +89,6 @@
                                 {{ $v->sku }}
                             </option>
                         @endforeach
-                    </select>
-                  </td>
-                  <td>
-                    <select name="items[{{ $key }}][location_id]" id="location{{ $key + 1 }}" class="form-control select2-js" required>
-                      @foreach ($locations as $loc)
-                        <option value="{{ $loc->id }}" {{ $item->location_id == $loc->id ? 'selected' : '' }}>{{ $loc->name }}</option>
-                      @endforeach
                     </select>
                   </td>
                   <td><input type="number" name="items[{{ $key }}][quantity]" id="pur_qty{{ $key + 1 }}" class="form-control quantity" value="{{ $item->quantity }}" step="any" onchange="rowTotal({{ $key + 1 }})"></td>
@@ -150,7 +142,6 @@
 
 <script>
     var products = @json($products);
-    var locations = @json($locations);
     var units = @json($units);
     var index = {{ count($invoice->items) + 1 }};
 
@@ -177,11 +168,6 @@
                 <option value="">Select Variation</option>
             </select>
             </td>
-            <td>
-            <select name="items[${rowIndex}][location_id]" id="location${index}" class="form-control select2-js" required>
-                ${locations.map(l => `<option value="${l.id}">${l.name}</option>`).join('')}
-            </select>
-            </td>
             <td><input type="number" name="items[${rowIndex}][quantity]" id="pur_qty${index}" class="form-control quantity" value="0" step="any" onchange="rowTotal(${index})"></td>
             <td>
             <select name="items[${rowIndex}][unit]" class="form-control select2-js">
@@ -194,7 +180,7 @@
         </tr>`;
         
         table.append(newRow);
-        $(`#item_name${index}, #variation${index}, #location${index}, #unit${index}`).select2({ width: '100%' });
+        $(`#item_name${index}, #variation${index}, #unit${index}`).select2({ width: '100%' });
         index++;
         updateSerialNumbers();
     }

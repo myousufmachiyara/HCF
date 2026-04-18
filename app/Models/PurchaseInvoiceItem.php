@@ -12,7 +12,6 @@ class PurchaseInvoiceItem extends Model
         'variation_id',
         'quantity',
         'unit',
-        'location_id',
         'price',
         'remarks',        
     ];
@@ -20,11 +19,6 @@ class PurchaseInvoiceItem extends Model
     public function invoice()
     {
         return $this->belongsTo(PurchaseInvoice::class, 'purchase_invoice_id');
-    }
-
-    public function location()
-    {
-        return $this->belongsTo(Location::class, 'location_id');
     }
 
     public function product()

@@ -43,25 +43,25 @@ class AccountsReportController extends Controller
         $account = ChartOfAccounts::find($accountId);
         if (!$account) return ['debit' => 0, 'credit' => 0];
 
-        // These columns in your DB represent the Opening Balances
-        $openingDr = (float) $account->receivables; 
+        $openingDr = (float) $account->receivables;
         $openingCr = (float) $account->payables;
-
         $targetDate = $asOfDate ?? $to;
 
-        // Sum activity from the vouchers table
-        $vDr = Voucher::where('ac_dr_sid', $accountId)
-                    ->where('date', '<=', $targetDate)
-                    ->sum('amount');
+        $query = Voucher::where('date', '<=', $targetDate);
+        
+        // For P&L and period reports, also apply $from
+        if ($from && !$asOfDate) {
+            $query->where('date', '>=', $from);
+            $openingDr = 0;  // period reports don't include opening balance
+            $openingCr = 0;
+        }
 
-        $vCr = Voucher::where('ac_cr_sid', $accountId)
-                    ->where('date', '<=', $targetDate)
-                    ->sum('amount');
+        $vDr = (clone $query)->where('ac_dr_sid', $accountId)->sum('amount');
+        $vCr = (clone $query)->where('ac_cr_sid', $accountId)->sum('amount');
 
-        // Return totals
         return [
             'debit'  => $openingDr + $vDr,
-            'credit' => $openingCr + $vCr
+            'credit' => $openingCr + $vCr,
         ];
     }
 
@@ -240,7 +240,8 @@ class AccountsReportController extends Controller
 
     private function bookHelper($ids, $from, $to)
     {
-        $vouchers = Voucher::whereBetween('date', [$from, $to])
+        $vouchers = Voucher::with(['debitAccount', 'creditAccount'])  // eager load
+            ->whereBetween('date', [$from, $to])
             ->where(fn($q) => $q->whereIn('ac_dr_sid', $ids)->orWhereIn('ac_cr_sid', $ids))
             ->orderBy('date')->get();
 
@@ -251,11 +252,11 @@ class AccountsReportController extends Controller
             $bal += ($dr - $cr);
             return [
                 $v->date,
-                ChartOfAccounts::find($v->ac_dr_sid)->name ?? '',
-                ChartOfAccounts::find($v->ac_cr_sid)->name ?? '',
+                $v->debitAccount->name  ?? '',   // from eager load, no extra query
+                $v->creditAccount->name ?? '',
                 $this->fmt($dr),
                 $this->fmt($cr),
-                $this->fmt($bal)
+                $this->fmt($bal),
             ];
         });
     }

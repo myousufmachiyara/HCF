@@ -62,7 +62,6 @@
               <tr class="bg-light">
                   <th>Item</th>
                   <th width="15%">Variation</th>
-                  <th width="15%">Location</th> {{-- Add this --}}
                   <th width="12%">Price</th>
                   <th width="10%">Qty</th>
                   <th width="12%">Total</th>
@@ -101,15 +100,7 @@
                         @endif
                     </select>
                 </td>
-                <td>
-                  <select name="items[{{ $i }}][location_id]" class="form-control" required>
-                    @foreach($locations as $loc)
-                      <option value="{{ $loc->id }}" {{ $item->location_id == $loc->id ? 'selected' : '' }}>
-                        {{ $loc->name }}
-                      </option>
-                    @endforeach
-                  </select>
-                </td>
+              
                 <td><input type="number" name="items[{{ $i }}][sale_price]" class="form-control sale-price" step="any" value="{{ $item->sale_price }}" required></td>
                 <td><input type="number" name="items[{{ $i }}][quantity]" class="form-control quantity" step="any" value="{{ $item->quantity }}" required></td>
                 <td><input type="number" class="form-control row-total" value="{{ $item->sale_price * $item->quantity }}" readonly></td>               
@@ -179,13 +170,7 @@
 </div>
 
 <script>
-    let rowIndex = {{ $invoice->items->count() }};
-
-    // Convert PHP locations to a JS string for addRow()
-    const locationOptions = `@foreach($locations as $loc)
-      <option value="{{ $loc->id }}">{{ $loc->name }}</option>
-    @endforeach`;
-
+    let rowIndex = {{ $invoice->items->count() }};  
 
     $(document).ready(function () {
         $('.select2-js').select2({ width: '100%' });
@@ -299,11 +284,6 @@
                     <select name="items[${idx}][variation_id]" class="form-control select2-js variation-select">
                         <option value="">Select Variation</option>
                     </select>
-                </td>
-                <td>
-                  <select name="items[${idx}][location_id]" class="form-control" required>
-                      ${locationOptions}
-                  </select>
                 </td>
                 <td><input type="number" name="items[${idx}][sale_price]" class="form-control sale-price" step="any" required></td>
                 <td><input type="number" name="items[${idx}][quantity]" class="form-control quantity" step="any" required></td>

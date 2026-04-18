@@ -22,8 +22,6 @@ use App\Http\Controllers\{
     AccountsReportController,
     SaleReturnController,
     PermissionController,
-    LocationController,
-    StockTransferController,
     ProductSubcategoryController,
 };
 
@@ -60,10 +58,6 @@ Route::middleware(['auth'])->group(function () {
         'product_categories' => ['controller' => ProductCategoryController::class, 'permission' => 'product_categories'],
         'product_subcategories' => ['controller' => ProductSubcategoryController::class, 'permission' => 'product_subcategories'],
         'attributes' => ['controller' => AttributeController::class, 'permission' => 'attributes'],
-
-        // Stock Management
-        'locations' => ['controller' => LocationController::class, 'permission' => 'locations'],
-        'stock_transfer' => ['controller' => StockTransferController::class, 'permission' => 'stock_transfer'],
 
         // Purchases
         'purchase_invoices' => ['controller' => PurchaseInvoiceController::class, 'permission' => 'purchase_invoices'],

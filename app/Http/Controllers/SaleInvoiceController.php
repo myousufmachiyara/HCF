@@ -4,12 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\SaleInvoice;
 use App\Models\SaleInvoiceItem;
-use App\Models\SaleItemCustomization;
 use App\Models\PurchaseInvoiceItem;
 use App\Models\ChartOfAccounts;
 use App\Models\Product;
 use App\Models\MeasurementUnit;
-use App\Models\Location;
 use App\Models\ProductVariation;
 use App\Models\Voucher;
 use Illuminate\Http\Request;
@@ -20,367 +18,423 @@ use Carbon\Carbon;
 
 class SaleInvoiceController extends Controller
 {
+    // ─────────────────────────────────────────────────────────────
+    // Shared account resolvers — always use account_code (stable)
+    // ─────────────────────────────────────────────────────────────
+    private function salesRevenueAccount(): ChartOfAccounts
+    {
+        $account = ChartOfAccounts::where('account_code', '401001')->first();
+        if (!$account) {
+            throw new \Exception('Sales Revenue account (401001) not found.');
+        }
+        return $account;
+    }
+
+    private function inventoryAccount(): ChartOfAccounts
+    {
+        $account = ChartOfAccounts::where('account_code', '104001')->first();
+        if (!$account) {
+            throw new \Exception('Inventory account (104001) not found.');
+        }
+        return $account;
+    }
+
+    private function cogsAccount(): ?ChartOfAccounts
+    {
+        return ChartOfAccounts::where('account_code', '501001')->first();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // STOCK CALCULATION
+    //
+    // Computes real-time stock per product and per variation.
+    //
+    // Root cause of the "showing 0" bug:
+    //   - The old code queried purchase_invoice_items by variation_id
+    //     alone. When a purchase was made WITHOUT selecting a variation
+    //     (variation_id = null), that quantity was never counted.
+    //   - The edit() method used withSum on relationships
+    //     (purchaseInvoices / saleInvoices) that don't exist on Product,
+    //     so it always returned 0.
+    //
+    // Fix: query by item_id (product) first, then additionally filter
+    // by variation_id for per-variation breakdown.
+    //
+    // Formula:
+    //   stock = (purchased + sale_returned) - (sold + purchase_returned)
+    //
+    // Column name map:
+    //   purchase_invoice_items  → item_id      (product foreign key)
+    //   sale_invoice_items      → product_id   (product foreign key)
+    //   purchase_return_items   → item_id
+    //   sale_return_items       → product_id, qty (not quantity)
+    // ─────────────────────────────────────────────────────────────
+    private function buildProductsWithStock(): \Illuminate\Support\Collection
+    {
+        return Product::with('variations')->orderBy('name')->get()
+            ->map(function ($product) {
+
+                // Product-level totals (all variations combined)
+                $purchased = (float) DB::table('purchase_invoice_items')
+                    ->join('purchase_invoices', 'purchase_invoice_items.purchase_invoice_id', '=', 'purchase_invoices.id')
+                    ->where('purchase_invoice_items.item_id', $product->id)
+                    ->whereNull('purchase_invoices.deleted_at')
+                    ->sum('purchase_invoice_items.quantity');
+
+                $sold = (float) DB::table('sale_invoice_items')
+                    ->join('sale_invoices', 'sale_invoice_items.sale_invoice_id', '=', 'sale_invoices.id')
+                    ->where('sale_invoice_items.product_id', $product->id)
+                    ->whereNull('sale_invoices.deleted_at')
+                    ->sum('sale_invoice_items.quantity');
+
+                $purchaseReturned = (float) DB::table('purchase_return_items')
+                    ->where('item_id', $product->id)
+                    ->sum('quantity');
+
+                $saleReturned = (float) DB::table('sale_return_items')
+                    ->where('product_id', $product->id)
+                    ->sum('qty');
+
+                $product->real_time_stock = ($purchased + $saleReturned) - ($sold + $purchaseReturned);
+
+                // Per-variation breakdown
+                foreach ($product->variations as $v) {
+                    $vPurchased = (float) DB::table('purchase_invoice_items')
+                        ->join('purchase_invoices', 'purchase_invoice_items.purchase_invoice_id', '=', 'purchase_invoices.id')
+                        ->where('purchase_invoice_items.item_id', $product->id)
+                        ->where('purchase_invoice_items.variation_id', $v->id)
+                        ->whereNull('purchase_invoices.deleted_at')
+                        ->sum('purchase_invoice_items.quantity');
+
+                    $vSold = (float) DB::table('sale_invoice_items')
+                        ->join('sale_invoices', 'sale_invoice_items.sale_invoice_id', '=', 'sale_invoices.id')
+                        ->where('sale_invoice_items.product_id', $product->id)
+                        ->where('sale_invoice_items.variation_id', $v->id)
+                        ->whereNull('sale_invoices.deleted_at')
+                        ->sum('sale_invoice_items.quantity');
+
+                    $vPurchaseReturned = (float) DB::table('purchase_return_items')
+                        ->where('item_id', $product->id)
+                        ->where('variation_id', $v->id)
+                        ->sum('quantity');
+
+                    $vSaleReturned = (float) DB::table('sale_return_items')
+                        ->where('product_id', $product->id)
+                        ->where('variation_id', $v->id)
+                        ->sum('qty');
+
+                    $v->current_stock = ($vPurchased + $vSaleReturned) - ($vSold + $vPurchaseReturned);
+                }
+
+                return $product;
+            });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // COGS calculation — uses actual purchase price (not sale price)
+    // ─────────────────────────────────────────────────────────────
+    private function calculateCogs(array $items): float
+    {
+        $totalCost = 0.0;
+
+        foreach ($items as $item) {
+            $query = PurchaseInvoiceItem::where('item_id', $item['product_id']);
+
+            // Only filter by variation if one was actually selected
+            if (!empty($item['variation_id'])) {
+                $query->where('variation_id', $item['variation_id']);
+            }
+
+            $latestPurchase = $query->latest('id')->first();
+
+            if ($latestPurchase) {
+                $totalCost += (float) $latestPurchase->price * (float) $item['quantity'];
+            }
+        }
+
+        return $totalCost;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // INDEX
+    // ─────────────────────────────────────────────────────────────
     public function index()
     {
         $invoices = SaleInvoice::with('items.product', 'account')->latest()->get();
         return view('sales.index', compact('invoices'));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // CREATE FORM
+    // ─────────────────────────────────────────────────────────────
     public function create()
     {
-        $products = Product::with(['variations'])->orderBy('name', 'asc')->get()
-            ->map(function ($product) {
-                $productTotalStock = 0;
+        $products        = $this->buildProductsWithStock();
+        $customers       = ChartOfAccounts::where('account_type', 'customer')->orderBy('name')->get();
+        $paymentAccounts = ChartOfAccounts::whereIn('account_type', ['cash', 'bank'])->orderBy('name')->get();
+        $units           = MeasurementUnit::all();
 
-                foreach ($product->variations as $v) {
-                    // 1. Total Purchases & Sales
-                    $purchased = DB::table('purchase_invoice_items')->where('variation_id', $v->id)->sum('quantity');
-                    $sold = DB::table('sale_invoice_items')->where('variation_id', $v->id)->sum('quantity');
-
-                    // 2. Transfers IN (Sum quantity where this variation was sent TO a location)
-                    // Note: Replace 'transfer_id' with your actual foreign key column name
-                    $transferredIn = DB::table('stock_transfer_details')
-                        ->join('stock_transfers', 'stock_transfer_details.transfer_id', '=', 'stock_transfers.id')
-                        ->where('stock_transfer_details.variation_id', $v->id)
-                        ->sum('stock_transfer_details.quantity');
-
-                    // 3. Transfers OUT (Usually in a simple system, Transfers In = Transfers Out globally, 
-                    // but we calculate it here for future-proofing location-specific logic)
-                    $transferredOut = DB::table('stock_transfer_details')
-                        ->join('stock_transfers', 'stock_transfer_details.transfer_id', '=', 'stock_transfers.id')
-                        ->where('stock_transfer_details.variation_id', $v->id)
-                        ->sum('stock_transfer_details.quantity');
-
-                    // Global Stock Calculation
-                    // In a global context, transfers usually cancel out unless you are filtering by a specific location.
-                    $v->current_stock = $purchased - $sold; 
-                    $productTotalStock += $v->current_stock;
-                }
-
-                $product->real_time_stock = $productTotalStock;
-                return $product;
-            });
-
-        $vendors = ChartOfAccounts::where('account_type', 'vendor')->get(); // For Purchase Invoice
-        $customers = ChartOfAccounts::where('account_type', 'customer')->get();
-        $paymentAccounts = ChartOfAccounts::whereIn('account_type', ['cash', 'bank'])->get();
-        $locations = Location::all();
-        $units = MeasurementUnit::all(); // Assuming you have a Unit model
-
-        return view('sales.create', compact('products', 'customers', 'paymentAccounts', 'locations', 'units'));
+        return view('sales.create', compact('products', 'customers', 'paymentAccounts', 'units'));
     }
-    
+
+    // ─────────────────────────────────────────────────────────────
+    // STORE
+    // ─────────────────────────────────────────────────────────────
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'date'               => 'required|date',
-            'account_id'         => 'required|exists:chart_of_accounts,id',
-            'type'               => 'required|in:cash,credit',
-            'discount'           => 'nullable|numeric|min:0',
-            'remarks'            => 'nullable|string',
-            'items'              => 'required|array|min:1',
-            'items.*.product_id' => 'required|exists:products,id',
-            'items.*.variation_id' => 'nullable|exists:product_variations,id',
-            'items.*.location_id' => 'required|exists:locations,id',
-            'items.*.sale_price' => 'required|numeric|min:0',
-            'items.*.quantity'   => 'required|numeric|min:1',
-            // Payment receiving fields
-            'payment_account_id' => 'nullable|exists:chart_of_accounts,id',
-            'amount_received'    => 'nullable|numeric|min:0',
+            'date'                   => 'required|date',
+            'account_id'             => 'required|exists:chart_of_accounts,id',
+            'type'                   => 'required|in:cash,credit',
+            'discount'               => 'nullable|numeric|min:0',
+            'remarks'                => 'nullable|string',
+            'items'                  => 'required|array|min:1',
+            'items.*.product_id'     => 'required|exists:products,id',
+            'items.*.variation_id'   => 'nullable|exists:product_variations,id',
+            'items.*.sale_price'     => 'required|numeric|min:0',
+            'items.*.quantity'       => 'required|numeric|min:1',
+            'payment_account_id'     => 'nullable|exists:chart_of_accounts,id',
+            'amount_received'        => 'nullable|numeric|min:0',
         ]);
 
         DB::beginTransaction();
-        try {
-            // Auto-generate Invoice Number
-            $lastInvoice = SaleInvoice::withTrashed()->orderBy('id', 'desc')->first();
-            $nextNumber = $lastInvoice ? intval($lastInvoice->invoice_no) + 1 : 1;
-            $invoiceNo = str_pad($nextNumber, 6, '0', STR_PAD_LEFT);
 
-            // 1. Create Invoice
+        try {
+            $last      = SaleInvoice::withTrashed()->orderByDesc('id')->first();
+            $invoiceNo = str_pad($last ? intval($last->invoice_no) + 1 : 1, 6, '0', STR_PAD_LEFT);
+
             $invoice = SaleInvoice::create([
                 'invoice_no' => $invoiceNo,
                 'date'       => $validated['date'],
                 'account_id' => $validated['account_id'],
                 'type'       => $validated['type'],
                 'discount'   => $validated['discount'] ?? 0,
-                'remarks'    => $validated['remarks'],
+                'remarks'    => $validated['remarks'] ?? null,
                 'created_by' => Auth::id(),
             ]);
 
-            // 2. Save Items & Track Net Total for Voucher validation
-            $totalBill = 0;
+            $subtotal = 0;
             foreach ($validated['items'] as $item) {
-                $invoiceItem = SaleInvoiceItem::create([
+                SaleInvoiceItem::create([
                     'sale_invoice_id' => $invoice->id,
                     'product_id'      => $item['product_id'],
                     'variation_id'    => $item['variation_id'] ?? null,
-                    'location_id'     => $item['location_id'], // Save location per item
                     'sale_price'      => $item['sale_price'],
                     'quantity'        => $item['quantity'],
                     'discount'        => 0,
                 ]);
-                
-                $totalBill += ($item['sale_price'] * $item['quantity']);
+                $subtotal += $item['sale_price'] * $item['quantity'];
             }
 
-            $netTotal = $totalBill - ($validated['discount'] ?? 0);
+            $netTotal = $subtotal - ($validated['discount'] ?? 0);
 
-            // 3. Record Sales Revenue Entry
-            $salesAccount = ChartOfAccounts::where('name', 'Sales Revenue')
-                ->orWhere('account_type', 'revenue')
-                ->first();
-
-            if (!$salesAccount) throw new \Exception('Sales Revenue account not found.');
-
+            // Entry A: DR Customer / CR Sales Revenue
+            $salesAccount = $this->salesRevenueAccount();
             Voucher::create([
                 'voucher_type' => 'journal',
                 'date'         => $validated['date'],
-                'ac_dr_sid'    => $validated['account_id'], // Debit Customer
-                'ac_cr_sid'    => $salesAccount->id,        // Credit Sales
+                'ac_dr_sid'    => $validated['account_id'],
+                'ac_cr_sid'    => $salesAccount->id,
                 'amount'       => $netTotal,
-                'remarks'      => "Sales Invoice #{$invoiceNo}",
-                'reference'    => $invoice->id,
+                'reference'    => 'SI-' . $invoice->id,
+                'remarks'      => "Sale Invoice #{$invoiceNo} — revenue",
             ]);
 
-            // 4. Handle Payment (If Cash or partial payment received)
-            if ($request->filled('payment_account_id') && $request->amount_received > 0) {
+            // Entry B: DR COGS / CR Inventory
+            $inventoryAccount = $this->inventoryAccount();
+            $cogsAccount      = $this->cogsAccount();
+
+            if ($cogsAccount) {
+                $totalCost = $this->calculateCogs($validated['items']);
+                if ($totalCost > 0) {
+                    Voucher::create([
+                        'voucher_type' => 'journal',
+                        'date'         => $validated['date'],
+                        'ac_dr_sid'    => $cogsAccount->id,
+                        'ac_cr_sid'    => $inventoryAccount->id,
+                        'amount'       => $totalCost,
+                        'reference'    => 'SI-' . $invoice->id,
+                        'remarks'      => "Sale Invoice #{$invoiceNo} — COGS",
+                    ]);
+                }
+            } else {
+                Log::warning('[SI] COGS account (501001) not found — COGS entry skipped.');
+            }
+
+            // Entry C: DR Cash/Bank / CR Customer (optional)
+            if ($request->filled('payment_account_id') && (float) $request->amount_received > 0) {
                 Voucher::create([
                     'voucher_type' => 'receipt',
                     'date'         => $validated['date'],
-                    'ac_dr_sid'    => $validated['payment_account_id'], // Debit Cash/Bank
-                    'ac_cr_sid'    => $validated['account_id'],         // Credit Customer
+                    'ac_dr_sid'    => $validated['payment_account_id'],
+                    'ac_cr_sid'    => $validated['account_id'],
                     'amount'       => $validated['amount_received'],
-                    'remarks'      => "Payment received for Invoice #{$invoiceNo}",
-                    'reference'    => $invoice->id,
-                ]);
-            }
-
-            // 5. NEW: Record Cost of Goods Sold (COGS) Entry
-            $inventoryAccount = ChartOfAccounts::where('name', 'Stock in Hand')->first();
-            $cogsAccount = ChartOfAccounts::where('account_type', 'cogs')->first();
-
-            if ($inventoryAccount && $cogsAccount) {
-                $totalCost = 0;
-                foreach ($validated['items'] as $item) {
-                    // Find the LATEST purchase of this product to get the most recent price
-                    $latestPurchase = PurchaseInvoiceItem::where('item_id', $item['product_id'])
-                        ->with('invoice') // Assuming relation exists
-                        ->latest()
-                        ->first();
-
-                    if ($latestPurchase) {
-                        $unitPrice = $latestPurchase->purchase_price;
-                        
-                        // Calculate Bilty share (Total Bilty / Total Items in that purchase)
-                        $totalQtyInPurchase = PurchaseInvoiceItem::where('purchase_invoice_id', $latestPurchase->purchase_invoice_id)->sum('quantity');
-                        $biltyCharge = $latestPurchase->purchaseInvoice->bilty_charges ?? 0;
-                        
-                        $landedCostPerUnit = $unitPrice + ($biltyCharge / ($totalQtyInPurchase ?: 1));
-                        
-                        $totalCost += ($landedCostPerUnit * $item['quantity']);
-                    }
-                }
-
-                Voucher::create([
-                    'voucher_type' => 'journal',
-                    'date'         => $validated['date'],
-                    'ac_dr_sid'    => $cogsAccount->id,      
-                    'ac_cr_sid'    => $inventoryAccount->id, 
-                    'amount'       => $totalCost,
-                    'remarks'      => "COGS (Landed Cost) for Invoice #{$invoiceNo}",
-                    'reference'    => $invoice->id,
+                    'reference'    => 'SI-' . $invoice->id,
+                    'remarks'      => "Payment received — Invoice #{$invoiceNo}",
                 ]);
             }
 
             DB::commit();
-            return redirect()->route('sale_invoices.index')->with('success', 'Sale Invoice and Payment processed.');
+            Log::info('[SI] Stored successfully', ['invoice_id' => $invoice->id]);
+
+            return redirect()->route('sale_invoices.index')
+                ->with('success', 'Sale Invoice created successfully.');
 
         } catch (\Throwable $e) {
             DB::rollBack();
-            Log::error('[SaleInvoice] Store failed: ' . $e->getMessage());
-            return back()->withInput()->with('error', 'Error saving invoice.');
+            Log::error('[SI] Store failed', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            return back()->withInput()->with('error', 'Error saving invoice: ' . $e->getMessage());
         }
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // EDIT FORM
+    // ─────────────────────────────────────────────────────────────
     public function edit($id)
     {
-        $invoice = SaleInvoice::with(['items', 'account'])->findOrFail($id);
-        
-        // Calculate real-time stock exactly like the create method
-        $products = Product::orderBy('name', 'asc')
-            ->withSum('purchaseInvoices as total_purchased', 'quantity')
-            ->withSum('saleInvoices as total_sold', 'quantity')
-            ->get()
-            ->map(function ($product) {
-                $product->real_time_stock = ($product->total_purchased ?? 0) - ($product->total_sold ?? 0);
-                return $product;
-            });
-
-        $amountReceived = Voucher::where('ac_cr_sid', $invoice->account_id)
-            ->where('remarks', 'LIKE', "%Invoice #{$invoice->invoice_no}%")
-            ->sum('amount');
-        $locations = Location::all();
+        $invoice        = SaleInvoice::with(['items', 'account'])->findOrFail($id);
+        $products       = $this->buildProductsWithStock();
+        $amountReceived = Voucher::where('reference', 'SI-' . $id)
+                            ->where('voucher_type', 'receipt')
+                            ->sum('amount');
 
         return view('sales.edit', [
-            'invoice' => $invoice,
-            'products' => $products, // Now contains real_time_stock
-            'customers' => ChartOfAccounts::where('account_type', 'customer')->get(),
-            'paymentAccounts' => ChartOfAccounts::whereIn('account_type', ['cash', 'bank'])->get(),
-            'amountReceived' => $amountReceived,
-            'locations' => $locations
+            'invoice'         => $invoice,
+            'products'        => $products,
+            'customers'       => ChartOfAccounts::where('account_type', 'customer')->orderBy('name')->get(),
+            'paymentAccounts' => ChartOfAccounts::whereIn('account_type', ['cash', 'bank'])->orderBy('name')->get(),
+            'amountReceived'  => $amountReceived,
         ]);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // UPDATE
+    // ─────────────────────────────────────────────────────────────
     public function update(Request $request, $id)
     {
         $validated = $request->validate([
-            'date'                 => 'required|date',
-            'account_id'           => 'required|exists:chart_of_accounts,id',
-            'type'                 => 'required|in:cash,credit',
-            'discount'             => 'nullable|numeric|min:0',
-            'remarks'              => 'nullable|string',
-            'items'                => 'required|array|min:1',
-            'items.*.product_id'   => 'required|exists:products,id',
-            'items.*.variation_id' => 'nullable|exists:product_variations,id',
-            'items.*.location_id'  => 'required|exists:locations,id',            
-            'items.*.sale_price'   => 'required|numeric|min:0',
-            'items.*.quantity'     => 'required|numeric|min:0.01',
-            'payment_account_id'   => 'nullable|exists:chart_of_accounts,id',
-            'amount_received'      => 'nullable|numeric|min:0',
+            'date'                   => 'required|date',
+            'account_id'             => 'required|exists:chart_of_accounts,id',
+            'type'                   => 'required|in:cash,credit',
+            'discount'               => 'nullable|numeric|min:0',
+            'remarks'                => 'nullable|string',
+            'items'                  => 'required|array|min:1',
+            'items.*.product_id'     => 'required|exists:products,id',
+            'items.*.variation_id'   => 'nullable|exists:product_variations,id',
+            'items.*.sale_price'     => 'required|numeric|min:0',
+            'items.*.quantity'       => 'required|numeric|min:0.01',
+            'payment_account_id'     => 'nullable|exists:chart_of_accounts,id',
+            'amount_received'        => 'nullable|numeric|min:0',
         ]);
 
         DB::beginTransaction();
-        try {
-            $invoice = SaleInvoice::with('items')->findOrFail($id);
-            $invoiceNo = $invoice->invoice_no;
 
-            // 2. Update Invoice Header
+        try {
+            $invoice   = SaleInvoice::with('items')->findOrFail($id);
+            $invoiceNo = $invoice->invoice_no;
+            $reference = 'SI-' . $invoice->id;
+
             $invoice->update([
                 'date'       => $validated['date'],
                 'account_id' => $validated['account_id'],
                 'type'       => $validated['type'],
                 'discount'   => $validated['discount'] ?? 0,
-                'remarks'    => $validated['remarks'],
+                'remarks'    => $validated['remarks'] ?? null,
             ]);
 
-            // 3. Clear existing items and Re-insert
             $invoice->items()->delete();
-            
-            $totalBill = 0;
-            $totalCost = 0;
+            $subtotal = 0;
 
             foreach ($validated['items'] as $item) {
                 SaleInvoiceItem::create([
                     'sale_invoice_id' => $invoice->id,
                     'product_id'      => $item['product_id'],
                     'variation_id'    => $item['variation_id'] ?? null,
-                    'location_id'     => $item['location_id'],
                     'sale_price'      => $item['sale_price'],
                     'quantity'        => $item['quantity'],
                     'discount'        => 0,
                 ]);
-
-                $totalBill += ($item['sale_price'] * $item['quantity']);
-
-                // COGS Logic
-                $latestPurchase = PurchaseInvoiceItem::where('item_id', $item['product_id'])
-                    ->when(!empty($item['variation_id']), function($q) use ($item) {
-                        return $q->where('variation_id', $item['variation_id']);
-                    })
-                    ->latest()
-                    ->first();
-
-                if ($latestPurchase && $latestPurchase->purchaseInvoice) {
-                    $unitPurchasePrice = $latestPurchase->purchase_price;
-                    $pInvoice = $latestPurchase->purchaseInvoice; 
-                    
-                    $totalQtyInBatch = PurchaseInvoiceItem::where('purchase_invoice_id', $latestPurchase->purchase_invoice_id)->sum('quantity');
-                    $biltyCharge = $pInvoice->bilty_charges ?? 0;
-                    
-                    $landedCostPerUnit = $unitPurchasePrice + ($biltyCharge / ($totalQtyInBatch ?: 1));
-                    $totalCost += ($landedCostPerUnit * $item['quantity']);
-                }
+                $subtotal += $item['sale_price'] * $item['quantity'];
             }
 
-            $netTotal = $totalBill - ($validated['discount'] ?? 0);
+            $netTotal  = $subtotal - ($validated['discount'] ?? 0);
+            $totalCost = $this->calculateCogs($validated['items']);
             $invoice->update(['net_amount' => $netTotal]);
 
-            // 4. Update Financial Vouchers (Sales & COGS)
-            // Note: We only delete Journal vouchers here, not the Receipt one
-            Voucher::where('reference', (string)$invoice->id)->where('voucher_type', 'journal')->delete();
+            Voucher::where('reference', $reference)->where('voucher_type', 'journal')->delete();
 
-            $inventoryAc = ChartOfAccounts::where('name', 'Stock in Hand')->first();
-            $cogsAc      = ChartOfAccounts::where('account_type', 'cogs')->first();
-            $salesAc     = ChartOfAccounts::where('account_type', 'revenue')->first();
+            $salesAccount     = $this->salesRevenueAccount();
+            $inventoryAccount = $this->inventoryAccount();
+            $cogsAccount      = $this->cogsAccount();
 
-            // Journal: Sales
             Voucher::create([
                 'voucher_type' => 'journal',
                 'date'         => $validated['date'],
                 'ac_dr_sid'    => $validated['account_id'],
-                'ac_cr_sid'    => $salesAc->id ?? null,
+                'ac_cr_sid'    => $salesAccount->id,
                 'amount'       => $netTotal,
-                'remarks'      => "Updated: Sales Invoice #{$invoiceNo}",
-                'reference'    => $invoice->id,
+                'reference'    => $reference,
+                'remarks'      => "Updated: Sale Invoice #{$invoiceNo} — revenue",
             ]);
 
-            // Journal: COGS
-            if ($inventoryAc && $cogsAc && $totalCost > 0) {
+            if ($cogsAccount && $totalCost > 0) {
                 Voucher::create([
                     'voucher_type' => 'journal',
                     'date'         => $validated['date'],
-                    'ac_dr_sid'    => $cogsAc->id,      
-                    'ac_cr_sid'    => $inventoryAc->id, 
+                    'ac_dr_sid'    => $cogsAccount->id,
+                    'ac_cr_sid'    => $inventoryAccount->id,
                     'amount'       => $totalCost,
-                    'remarks'      => "Updated: COGS (Landed) #{$invoiceNo}",
-                    'reference'    => $invoice->id,
+                    'reference'    => $reference,
+                    'remarks'      => "Updated: Sale Invoice #{$invoiceNo} — COGS",
                 ]);
             }
 
-            // 5. UPDATE OR CREATE RECEIPT VOUCHER
-            $paymentVoucher = Voucher::where('reference', (string)$invoice->id)->where('voucher_type', 'receipt')->first();
+            $paymentVoucher = Voucher::where('reference', $reference)
+                ->where('voucher_type', 'receipt')
+                ->first();
 
-            if ($request->filled('amount_received') && $request->amount_received > 0 && $request->filled('payment_account_id')) {
+            $hasPayment = $request->filled('payment_account_id')
+                && (float) $request->amount_received > 0;
+
+            if ($hasPayment) {
                 $receiptData = [
-                    'date'         => $validated['date'],
-                    'ac_dr_sid'    => $validated['payment_account_id'],
-                    'ac_cr_sid'    => $validated['account_id'],
-                    'amount'       => $validated['amount_received'],
-                    'remarks'      => "Payment for Invoice #{$invoiceNo}",
-                    'reference'    => $invoice->id,
+                    'date'      => $validated['date'],
+                    'ac_dr_sid' => $validated['payment_account_id'],
+                    'ac_cr_sid' => $validated['account_id'],
+                    'amount'    => $validated['amount_received'],
+                    'remarks'   => "Payment — Invoice #{$invoiceNo}",
+                    'reference' => $reference,
                 ];
-
-                if ($paymentVoucher) {
-                    $paymentVoucher->update($receiptData);
-                } else {
-                    Voucher::create(array_merge(['voucher_type' => 'receipt'], $receiptData));
-                }
+                $paymentVoucher
+                    ? $paymentVoucher->update($receiptData)
+                    : Voucher::create(array_merge(['voucher_type' => 'receipt'], $receiptData));
             } elseif ($paymentVoucher) {
-                // If the user cleared the amount or account, remove the payment record
                 $paymentVoucher->delete();
             }
 
             DB::commit();
-            return redirect()->route('sale_invoices.index')->with('success', 'Invoice and Payment updated successfully.');
+            Log::info('[SI] Updated successfully', ['invoice_id' => $invoice->id]);
+
+            return redirect()->route('sale_invoices.index')
+                ->with('success', 'Invoice and payment updated successfully.');
 
         } catch (\Exception $e) {
             DB::rollBack();
-            \Log::error("Invoice Update Error: " . $e->getMessage());
-            return back()->with('error', 'Update Failed: ' . $e->getMessage())->withInput();
+            Log::error('[SI] Update error', ['error' => $e->getMessage()]);
+            return back()->with('error', 'Update failed: ' . $e->getMessage())->withInput();
         }
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // PRINT  (PDF)
+    // ─────────────────────────────────────────────────────────────
     public function print($id)
     {
-        // 1. Fetch Invoice with Relations
-        $invoice = SaleInvoice::with(['account', 'items.product', 'items.variation'])->findOrFail($id);
+        $invoice        = SaleInvoice::with(['account', 'items.product', 'items.variation'])->findOrFail($id);
+        $amountReceived = Voucher::where('reference', 'SI-' . $id)
+                            ->where('voucher_type', 'receipt')
+                            ->sum('amount');
 
-        // 2. Fetch Amount Received from Vouchers
-        $amountReceived = Voucher::where('ac_cr_sid', $invoice->account_id)
-            ->where('remarks', 'LIKE', "%Invoice #{$invoice->invoice_no}%")
-            ->sum('amount');
-
-        // 3. Initialize TCPDF
         $pdf = new \TCPDF();
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
@@ -388,11 +442,9 @@ class SaleInvoiceController extends Controller
         $pdf->SetCreator(PDF_CREATOR);
         $pdf->SetAuthor('Lucky Corporation');
         $pdf->SetTitle('SALE-' . $invoice->invoice_no);
-
         $pdf->AddPage();
         $pdf->SetFont('helvetica', '', 10);
 
-        // --- Header Section ---
         $logoPath = public_path('assets/img/billtrix-logo-black.png');
         if (file_exists($logoPath)) {
             $pdf->Image($logoPath, 15, 12, 35);
@@ -401,21 +453,19 @@ class SaleInvoiceController extends Controller
         $pdf->SetFont('helvetica', 'B', 16);
         $pdf->SetXY(110, 12);
         $pdf->Cell(85, 10, 'SALE INVOICE', 0, 1, 'R');
-        
+
         $pdf->SetFont('helvetica', '', 10);
         $pdf->SetXY(110, 20);
         $pdf->Cell(85, 5, 'Invoice #: ' . $invoice->invoice_no, 0, 1, 'R');
         $pdf->SetX(110);
-        $pdf->Cell(85, 5, 'Date: ' . Carbon::parse($invoice->invoice_date)->format('d-M-Y'), 0, 1, 'R');
+        $pdf->Cell(85, 5, 'Date: ' . Carbon::parse($invoice->date)->format('d-M-Y'), 0, 1, 'R');
         $pdf->SetX(110);
-        $pdf->Cell(85, 5, 'Customer: ' . $invoice->account->name, 0, 1, 'R');
-
+        $pdf->Cell(85, 5, 'Customer: ' . ($invoice->account->name ?? '-'), 0, 1, 'R');
         $pdf->Ln(10);
 
-        /* ---------------- Items Table with Separate Variation Column ---------------- */
         $html = '
         <table border="1" cellpadding="4" style="text-align:center;font-size:10px;">
-            <tr style="font-weight:bold; background-color:#f5f5f5;">
+            <tr style="font-weight:bold;background-color:#f5f5f5;">
                 <th width="5%">#</th>
                 <th width="35%">Item Name</th>
                 <th width="20%">Variation</th>
@@ -424,20 +474,19 @@ class SaleInvoiceController extends Controller
                 <th width="15%">Total</th>
             </tr>';
 
-        $count = 0;
-        $totalQty = 0;
-        $subTotal = 0;
+        $count = $totalQty = $subTotal = 0;
 
         foreach ($invoice->items as $item) {
             $count++;
             $lineTotal = $item->sale_price * $item->quantity;
+            $unitCode  = $item->product->measurementUnit->shortcode ?? '';
 
             $html .= '
             <tr>
                 <td>' . $count . '</td>
-                <td style="text-align:left">' . ($item->product->name ?? '-') . '</td>
-                <td style="text-align:left">' . ($item->variation->sku ?? '-') . '</td>
-                <td>' . number_format($item->quantity, 2) . ' ' . $item->product->measurementUnit->shortcode. '</td>
+                <td style="text-align:left">' . e($item->product->name ?? '-') . '</td>
+                <td style="text-align:left">' . e($item->variation->sku ?? '-') . '</td>
+                <td>' . number_format($item->quantity, 2) . ' ' . e($unitCode) . '</td>
                 <td>' . number_format($item->sale_price, 2) . '</td>
                 <td>' . number_format($lineTotal, 2) . '</td>
             </tr>';
@@ -446,15 +495,13 @@ class SaleInvoiceController extends Controller
             $subTotal += $lineTotal;
         }
 
-        // Calculations
         $invoiceDiscount = $invoice->discount ?? 0;
-        $netTotal = $subTotal - $invoiceDiscount;
-        $balanceDue = $netTotal - $amountReceived;
+        $netTotal        = $subTotal - $invoiceDiscount;
+        $balanceDue      = $netTotal - $amountReceived;
 
-        /* ---------------- Table Footer ---------------- */
         $html .= '
         <tr>
-            <td colspan="3" align="right" bgcolor="#f5f5f5"><b>Total Quantity</b></td>
+            <td colspan="3" align="right" bgcolor="#f5f5f5"><b>Total Qty</b></td>
             <td><b>' . number_format($totalQty, 2) . '</b></td>
             <td align="right" bgcolor="#f5f5f5"><b>Sub Total</b></td>
             <td align="right"><b>' . number_format($subTotal, 2) . '</b></td>
@@ -485,32 +532,24 @@ class SaleInvoiceController extends Controller
 
         $pdf->writeHTML($html, true, false, false, false, '');
 
-        /* ---------------- Remarks ---------------- */
         if (!empty($invoice->remarks)) {
             $pdf->Ln(2);
-            $pdf->writeHTML('<p style="font-size:9px;"><b>Remarks:</b> ' . nl2br($invoice->remarks) . '</p>', true, false, false, false, '');
+            $pdf->writeHTML('<p style="font-size:9px;"><b>Remarks:</b> ' . nl2br(e($invoice->remarks)) . '</p>', true, false, false, false, '');
         }
 
-        /* ---------------- Footer Signatures ---------------- */
-        if ($pdf->GetY() > 240) {
-            $pdf->AddPage();
-        }
+        if ($pdf->GetY() > 240) { $pdf->AddPage(); }
 
         $pdf->Ln(30);
-        $yPosition = $pdf->GetY();
-        $lineWidth = 60;
+        $y = $pdf->GetY();
+        $w = 60;
 
-        $pdf->Line(20, $yPosition, 20 + $lineWidth, $yPosition);
-        $pdf->Line(130, $yPosition, 130 + $lineWidth, $yPosition);
-
-        $pdf->SetY($yPosition + 2);
+        $pdf->Line(20, $y, 20 + $w, $y);
+        $pdf->Line(130, $y, 130 + $w, $y);
+        $pdf->SetY($y + 2);
         $pdf->SetFont('helvetica', 'B', 9);
-        $pdf->SetX(20);
-        $pdf->Cell($lineWidth, 5, 'Customer Signature', 0, 0, 'C');
-        $pdf->SetX(130);
-        $pdf->Cell($lineWidth, 5, 'Authorized Signature', 0, 0, 'C');
+        $pdf->SetX(20);  $pdf->Cell($w, 5, 'Customer Signature',  0, 0, 'C');
+        $pdf->SetX(130); $pdf->Cell($w, 5, 'Authorized Signature', 0, 0, 'C');
 
         return $pdf->Output('Invoice_' . $invoice->invoice_no . '.pdf', 'I');
     }
-
 }

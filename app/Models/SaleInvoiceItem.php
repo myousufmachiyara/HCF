@@ -11,18 +11,12 @@ class SaleInvoiceItem extends Model
         'product_id',
         'variation_id',
         'sale_price',
-        'location_id',
         'quantity',
     ];
 
     public function saleInvoice()
     {
         return $this->belongsTo(SaleInvoice::class, 'sale_invoice_id');
-    }
-
-    public function location()
-    {
-        return $this->belongsTo(Location::class, 'location_id');
     }
 
     public function product()

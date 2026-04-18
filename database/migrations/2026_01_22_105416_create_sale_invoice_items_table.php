@@ -15,13 +15,11 @@ return new class extends Migration
             $table->id();
             $table->unsignedBigInteger('sale_invoice_id');
             $table->unsignedBigInteger('product_id');
-            $table->unsignedBigInteger('variation_id');
+            $table->unsignedBigInteger('variation_id')->nullable();
             $table->decimal('sale_price', 10, 2); // actual selling price
             $table->integer('quantity');
-            $table->unsignedBigInteger('location_id');
 
             $table->timestamps();
-            $table->foreign('location_id')->references('id')->on('locations')->onDelete('cascade');
             $table->foreign('sale_invoice_id')->references('id')->on('sale_invoices');
             $table->foreign('product_id')->references('id')->on('products');
             $table->foreign('variation_id')->references('id')->on('product_variations')->onDelete('cascade');

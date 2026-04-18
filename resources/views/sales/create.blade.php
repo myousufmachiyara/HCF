@@ -4,7 +4,6 @@
 
 @section('content')
 <style>
-    /* Prevents Select2 from collapsing and fixes alignment */
     .select2-container--default .select2-selection--single {
         height: 38px !important;
         padding: 5px;
@@ -16,6 +15,8 @@
     }
     #itemTable th { background: #f8f9fa; }
     #itemTable td { vertical-align: middle; }
+    .stock-exceeded { border-color: red !important; }
+    .stock-ok       { border-color: #28a745 !important; }
 </style>
 
 <div class="row">
@@ -77,7 +78,6 @@
                             <tr>
                                 <th>Item</th>
                                 <th width="15%">Variation</th>
-                                <th width="15%">Location</th>
                                 <th width="10%">Price</th>
                                 <th width="10%">Qty</th>
                                 <th width="12%">Total</th>
@@ -87,36 +87,36 @@
                         <tbody>
                             <tr>
                                 <td>
-                                    <select name="items[0][product_id]" id="item_name0" class="form-control select2-js product-select" onchange="onItemNameChange(this)" required>
+                                    <select name="items[0][product_id]" id="item_name0"
+                                            class="form-control select2-js product-select"
+                                            onchange="onItemNameChange(this)" required>
                                         <option value="">Select Product</option>
                                         @foreach($products as $product)
-                                            <option value="{{ $product->id }}" 
-                                                    data-price="{{ $product->selling_price }}" 
-                                                    data-stock="{{ $product->real_time_stock }}">
-                                                {{ $product->name }} (Stock: {{ $product->real_time_stock }})
+                                            <option value="{{ $product->id }}"
+                                                    data-price="{{ $product->selling_price ?? 0 }}"
+                                                    data-stock="{{ $product->real_time_stock ?? 0 }}">
+                                                {{ $product->name }} (Stock: {{ $product->real_time_stock ?? 0 }})
                                             </option>
                                         @endforeach
                                     </select>
                                 </td>
                                 <td>
-                                    <select name="items[0][variation_id]" id="variation0" class="form-control select2-js variation-select">
+                                    <select name="items[0][variation_id]" id="variation0"
+                                            class="form-control select2-js variation-select">
                                         <option value="">Select Variation</option>
                                     </select>
                                 </td>
-                                <td>
-                                    <select name="items[0][location_id]" id="location0" class="form-control select2-js location-select" onchange="fetchLocationStock(0)" required>
-                                        <option value="">Select Location</option>
-                                        @foreach($locations as $loc)
-                                            <option value="{{ $loc->id }}">{{ $loc->name }}</option>
-                                        @endforeach
-                                    </select>
-                                    <small class="text-muted">Stock: <strong id="stock_display0">0</strong></small>
-                                </td>
                                 <td><input type="number" name="items[0][sale_price]" class="form-control sale-price" step="any" required></td>
-                                <td><input type="number" name="items[0][quantity]" class="form-control quantity" step="any" required></td>
+                                <td>
+                                    <input type="number" name="items[0][quantity]" class="form-control quantity" step="any" required>
+                                    {{-- FIX: hidden field stores available stock for this row so JS can read it --}}
+                                    <small class="text-muted stock-hint"></small>
+                                </td>
                                 <td><input type="number" name="items[0][total]" class="form-control row-total" readonly></td>
                                 <td>
-                                    <button type="button" class="btn btn-danger btn-sm" onclick="removeRow(this)"><i class="fas fa-times"></i></button>
+                                    <button type="button" class="btn btn-danger btn-sm" onclick="removeRow(this)">
+                                        <i class="fas fa-times"></i>
+                                    </button>
                                 </td>
                             </tr>
                         </tbody>
@@ -152,7 +152,8 @@
                         </div>
                         <div class="col-md-3">
                             <label>Amount Received</label>
-                            <input type="number" name="amount_received" id="amountReceived" class="form-control" step="any" value="0">
+                            <input type="number" name="amount_received" id="amountReceived"
+                                   class="form-control" step="any" value="0">
                         </div>
                         <div class="col-md-5 text-end">
                             <label>Remaining Balance</label>
@@ -170,176 +171,211 @@
 </div>
 
 <script>
-    // Initialize Row Index based on current rows
-    let rowIndex = $('#itemTable tbody tr').length;
-    let locations = @json($locations); // Ensure this is passed from Controller
+let rowIndex = $('#itemTable tbody tr').length;
 
-    $(document).ready(function () {
-        // Initial Select2 Activation
-        $('.select2-js').select2({ width: '100%' });
+$(document).ready(function () {
+    $('.select2-js').select2({ width: '100%' });
 
-        // Calculation triggers
-        $(document).on('input', '.sale-price, .quantity', function () {
-            calcRowTotal($(this).closest('tr'));
-        });
-
-        $(document).on('input', '#amountReceived, #discountInput', calcTotal);
-
-        // Cash/Credit toggle logic
-        $(document).on('change', '#invoice_type', function() {
-            if($(this).val() === 'cash') {
-                $('#amountReceived').val($('#netAmountInput').val());
-            } else {
-                $('#amountReceived').val(0);
-            }
-            calcTotal();
-        });
-
-        // Stock Validation Color logic
-        $(document).on('input', '.quantity', function () {
-            const row = $(this).closest('tr');
-            const stock = parseFloat(row.find('strong[id^="stock_display"]').text()) || 0;
-            const qty = parseFloat($(this).val()) || 0;
-            
-            if (qty > stock) {
-                $(this).addClass('is-invalid').css('border-color', 'red');
-            } else {
-                $(this).removeClass('is-invalid').css('border-color', '');
-            }
-        });
+    // Row total recalc
+    $(document).on('input', '.sale-price, .quantity', function () {
+        calcRowTotal($(this).closest('tr'));
     });
 
-    // FUNCTIONS MUST BE OUTSIDE $(document).ready()
-    function addRow() {
-        const idx = rowIndex++;
-        const rowHtml = `
-        <tr>
-            <td>
-                <select name="items[${idx}][product_id]" id="item_name${idx}" class="form-control product-select" onchange="onItemNameChange(this)" required>
-                    <option value="">Select Product</option>
-                    @foreach($products as $product)
-                        <option value="{{ $product->id }}" data-price="{{ $product->selling_price }}" data-stock="{{ $product->real_time_stock }}">
-                            {{ $product->name }} (Stock: {{ $product->real_time_stock }})
-                        </option>
-                    @endforeach
-                </select>
-            </td>
-            <td>
-                <select name="items[${idx}][variation_id]" id="variation${idx}" class="form-control variation-select">
-                    <option value="">Select Variation</option>
-                </select>
-            </td>
-            <td>
-                <select name="items[${idx}][location_id]" id="location${idx}" class="form-control location-select" onchange="fetchLocationStock(${idx})" required>
-                    <option value="">Select Location</option>
-                    ${locations.map(l => `<option value="${l.id}">${l.name}</option>`).join('')}
-                </select>
-                <small class="text-muted">Stock: <strong id="stock_display${idx}">0</strong></small>
-            </td>
-            <td><input type="number" name="items[${idx}][sale_price]" class="form-control sale-price" step="any" required></td>
-            <td><input type="number" name="items[${idx}][quantity]" class="form-control quantity" step="any" required></td>
-            <td><input type="number" name="items[${idx}][total]" class="form-control row-total" readonly></td>
-            <td><button type="button" class="btn btn-danger btn-sm" onclick="removeRow(this)"><i class="fas fa-times"></i></button></td>
-        </tr>`;
+    // Balance recalc
+    $(document).on('input', '#amountReceived, #discountInput', calcTotal);
 
-        $('#itemTable tbody').append(rowHtml);
-        $(`#item_name${idx}, #variation${idx}, #location${idx}`).select2({ width: '100%' });
-    }
-
-    function onItemNameChange(selectElement) {
-        const $row = $(selectElement).closest('tr');
-        const itemId = selectElement.value;
-        const idMatch = selectElement.id.match(/\d+$/);
-        if (!idMatch) return;
-        const rowNum = idMatch[0];
-
-        // 1. Auto-fill Price
-        const selectedOption = selectElement.options[selectElement.selectedIndex];
-        const price = $(selectedOption).data('price') || 0;
-        $row.find('.sale-price').val(price);
-
-        // 2. Fetch Variations via AJAX
-        const variationSelect = $(`#variation${rowNum}`);
-        
-        if (itemId) {
-            variationSelect.html('<option value="">Loading...</option>').trigger('change.select2');
-
-            fetch(`/product/${itemId}/variations`)
-                .then(res => res.json())
-                .then(data => {
-                    variationSelect.html('<option value="">Select Variation</option>');
-                    const variations = data.variation || data.variations || [];
-                    
-                    if (variations.length > 0) {
-                        variations.forEach(v => {
-                            variationSelect.append(`<option value="${v.id}">${v.sku || ''} ${v.name ? v.name : ''}</option>`);
-                        });
-                    } else {
-                        variationSelect.html('<option value="">Standard (No Variations)</option>');
-                    }
-                    variationSelect.trigger('change.select2');
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    variationSelect.html('<option value="">Error</option>').trigger('change.select2');
-                });
+    // Cash: auto-fill amount received = net total
+    $(document).on('change', '#invoice_type', function () {
+        if ($(this).val() === 'cash') {
+            $('#amountReceived').val($('#netAmountInput').val());
         } else {
-            variationSelect.html('<option value="">Select Variation</option>').trigger('change.select2');
+            $('#amountReceived').val(0);
         }
-        
+        calcTotal();
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // FIX: Stock validation
+    //
+    // Old code looked for strong[id^="stock_display"] which was never
+    // rendered — so availableStock was always 0 and every qty > 0
+    // turned red.
+    //
+    // Fix: read data-stock from the SELECTED product option.
+    // If a variation is selected, use the variation's own stock
+    // from its data-stock attribute; otherwise fall back to the
+    // product-level stock.
+    // ─────────────────────────────────────────────────────────────
+    $(document).on('input', '.quantity', function () {
+        validateStock($(this).closest('tr'));
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// getAvailableStock — reads stock for the currently selected
+// product option (and variation option if one is chosen)
+// ─────────────────────────────────────────────────────────────────
+function getAvailableStock($row) {
+    const $productSelect   = $row.find('.product-select');
+    const $variationSelect = $row.find('.variation-select');
+
+    // Check if a specific variation is selected and has its own stock
+    const $selectedVariation = $variationSelect.find('option:selected');
+    const variationStock     = parseFloat($selectedVariation.data('stock'));
+
+    if ($selectedVariation.val() && !isNaN(variationStock)) {
+        return variationStock;
+    }
+
+    // Fall back to product-level stock from the product option
+    const $selectedProduct = $productSelect.find('option:selected');
+    const productStock     = parseFloat($selectedProduct.data('stock'));
+    return isNaN(productStock) ? 0 : productStock;
+}
+
+function validateStock($row) {
+    const $qtyInput      = $row.find('.quantity');
+    const $hint          = $row.find('.stock-hint');
+    const qty            = parseFloat($qtyInput.val()) || 0;
+    const availableStock = getAvailableStock($row);
+
+    if (qty > availableStock) {
+        $qtyInput.addClass('stock-exceeded').removeClass('stock-ok');
+        $hint.text('⚠ Only ' + availableStock + ' available').css('color', 'red');
+    } else {
+        $qtyInput.addClass('stock-ok').removeClass('stock-exceeded');
+        $hint.text('In stock: ' + availableStock).css('color', '#28a745');
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// addRow — builds a new table row with Blade-rendered product list
+// ─────────────────────────────────────────────────────────────────
+function addRow() {
+    const idx    = rowIndex++;
+    const rowHtml = `
+    <tr>
+        <td>
+            <select name="items[${idx}][product_id]" id="item_name${idx}"
+                    class="form-control product-select" onchange="onItemNameChange(this)" required>
+                <option value="">Select Product</option>
+                @foreach($products as $product)
+                    <option value="{{ $product->id }}"
+                            data-price="{{ $product->selling_price ?? 0 }}"
+                            data-stock="{{ $product->real_time_stock ?? 0 }}">
+                        {{ $product->name }} (Stock: {{ $product->real_time_stock ?? 0 }})
+                    </option>
+                @endforeach
+            </select>
+        </td>
+        <td>
+            <select name="items[${idx}][variation_id]" id="variation${idx}"
+                    class="form-control variation-select">
+                <option value="">Select Variation</option>
+            </select>
+        </td>
+        <td><input type="number" name="items[${idx}][sale_price]" class="form-control sale-price" step="any" required></td>
+        <td>
+            <input type="number" name="items[${idx}][quantity]" class="form-control quantity" step="any" required>
+            <small class="text-muted stock-hint"></small>
+        </td>
+        <td><input type="number" name="items[${idx}][total]" class="form-control row-total" readonly></td>
+        <td>
+            <button type="button" class="btn btn-danger btn-sm" onclick="removeRow(this)">
+                <i class="fas fa-times"></i>
+            </button>
+        </td>
+    </tr>`;
+
+    $('#itemTable tbody').append(rowHtml);
+    $(`#item_name${idx}, #variation${idx}`).select2({ width: '100%' });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// onItemNameChange — fires when a product is selected
+// ─────────────────────────────────────────────────────────────────
+function onItemNameChange(selectElement) {
+    const $row     = $(selectElement).closest('tr');
+    const itemId   = selectElement.value;
+    const idMatch  = selectElement.id.match(/\d+$/);
+    if (!idMatch) return;
+    const rowNum   = idMatch[0];
+
+    // Auto-fill price from data-price attribute
+    const $selectedOption = $(selectElement.options[selectElement.selectedIndex]);
+    $row.find('.sale-price').val($selectedOption.data('price') || 0);
+
+    // Reset variation dropdown
+    const $variationSelect = $(`#variation${rowNum}`);
+
+    if (!itemId) {
+        $variationSelect.html('<option value="">Select Variation</option>').trigger('change.select2');
+        $row.find('.stock-hint').text('');
+        $row.find('.quantity').removeClass('stock-exceeded stock-ok');
         calcRowTotal($row);
+        return;
     }
 
-    function removeRow(btn) {
-        if ($('#itemTable tbody tr').length > 1) {
-            $(btn).closest('tr').remove();
-            calcTotal();
-        }
-    }
+    $variationSelect.html('<option value="">Loading...</option>').trigger('change.select2');
 
-    function calcRowTotal(row) {
-        const price = parseFloat(row.find('.sale-price').val()) || 0;
-        const qty = parseFloat(row.find('.quantity').val()) || 0;
-        row.find('.row-total').val((price * qty).toFixed(2));
+    fetch(`/product/${itemId}/variations`)
+        .then(res => res.json())
+        .then(data => {
+            const variations = data.variation || data.variations || [];
+
+            if (variations.length > 0) {
+                let html = '<option value="">Select Variation</option>';
+                variations.forEach(v => {
+                    // Store per-variation stock in data-stock so validation can read it
+                    const vStock = v.stock_quantity ?? v.current_stock ?? 0;
+                    const label  = [v.sku, v.name].filter(Boolean).join(' ');
+                    html += `<option value="${v.id}" data-stock="${vStock}">${label} (Stock: ${vStock})</option>`;
+                });
+                $variationSelect.html(html);
+            } else {
+                $variationSelect.html('<option value="">Standard (No Variations)</option>');
+            }
+            $variationSelect.trigger('change.select2');
+
+            // Re-run stock validation now that dropdown is populated
+            validateStock($row);
+        })
+        .catch(() => {
+            $variationSelect.html('<option value="">Error loading</option>').trigger('change.select2');
+        });
+
+    calcRowTotal($row);
+}
+
+function removeRow(btn) {
+    if ($('#itemTable tbody tr').length > 1) {
+        $(btn).closest('tr').remove();
         calcTotal();
     }
+}
 
-    function calcTotal() {
-        let total = 0;
-        $('.row-total').each(function () {
-            total += parseFloat($(this).val()) || 0;
-        });
-        const discount = parseFloat($('#discountInput').val()) || 0;
-        const netAmount = Math.max(0, total - discount);
-        
-        $('#netAmountText').text(netAmount.toLocaleString(undefined, {minimumFractionDigits: 2}));
-        $('#netAmountInput').val(netAmount.toFixed(2));
+function calcRowTotal($row) {
+    const price = parseFloat($row.find('.sale-price').val()) || 0;
+    const qty   = parseFloat($row.find('.quantity').val())   || 0;
+    $row.find('.row-total').val((price * qty).toFixed(2));
+    validateStock($row);
+    calcTotal();
+}
 
-        const received = parseFloat($('#amountReceived').val()) || 0;
-        const balance = netAmount - received;
-        $('#balanceAmountText').text(balance.toLocaleString(undefined, {minimumFractionDigits: 2}));
-    }
+function calcTotal() {
+    let total = 0;
+    $('.row-total').each(function () {
+        total += parseFloat($(this).val()) || 0;
+    });
+    const discount  = parseFloat($('#discountInput').val()) || 0;
+    const netAmount = Math.max(0, total - discount);
 
-    function fetchLocationStock(rowId) {
-    const variationId = $(`#variation${rowId}`).val();
-    const locationId = $(`#location${rowId}`).val();
-    const stockSpan = $(`#stock_display${rowId}`);
+    $('#netAmountText').text(netAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }));
+    $('#netAmountInput').val(netAmount.toFixed(2));
 
-    if (variationId && locationId) {
-            stockSpan.text('...');
-            
-            $.get('/get-location-stock', {
-                variation_id: variationId,
-                location_id: locationId
-            }, function(data) {
-                stockSpan.text(data.stock);
-                // Optional: color coding
-                if(data.stock <= 0) stockSpan.addClass('text-danger').removeClass('text-primary');
-                else stockSpan.addClass('text-primary').removeClass('text-danger');
-            });
-        } else {
-            stockSpan.text('0');
-        }
-    }
+    const received = parseFloat($('#amountReceived').val()) || 0;
+    const balance  = netAmount - received;
+    $('#balanceAmountText').text(balance.toLocaleString(undefined, { minimumFractionDigits: 2 }));
+}
 </script>
 @endsection

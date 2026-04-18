@@ -4,212 +4,263 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Product;
-use App\Models\Location;
 use Illuminate\Support\Facades\DB;
-use Carbon\Carbon;
 
 class InventoryReportController extends Controller
 {
     public function inventoryReports(Request $request)
     {
-        $tab          = $request->get('tab', 'IL');
-        $itemId       = $request->get('item_id');
-        $locationId   = $request->get('location_id');
-        $from         = $request->get('from_date', date('Y-m-01'));
-        $to           = $request->get('to_date', date('Y-m-d'));
-        $costingMethod = $request->get('costing_method', 'avg');
+        $tab     = $request->get('tab', 'IL');
+        $itemId  = $request->get('item_id');
+        $from    = $request->get('from_date', date('Y-m-01'));
+        $to      = $request->get('to_date', date('Y-m-d'));
 
-        $products  = Product::with('variations')->orderBy('name', 'asc')->get();
-        $locations = Location::all();
+        $products    = Product::with('variations')->orderBy('name')->get();
+        $itemLedger  = collect();
+        $openingQty  = 0;
+        $stockInHand = collect();
 
-        $itemLedger     = collect();
-        $openingQty     = 0;
-        $stockInHand    = collect();
-        $stockTransfers = collect();
-        $lotWiseStock   = collect();
-        $lotWiseLedger  = collect();
+        // ================================================================
+        // TAB 1 — ITEM LEDGER
+        // ================================================================
+        if ($tab === 'IL' && $itemId) {
 
-        // ================= ITEM LEDGER =================
-        if ($tab == 'IL' && $itemId) {
-
-            // 1. Calculate Opening Balance
-            $opPurchase = DB::table('purchase_invoice_items')
+            $opPurchased = DB::table('purchase_invoice_items')
                 ->join('purchase_invoices', 'purchase_invoice_items.purchase_invoice_id', '=', 'purchase_invoices.id')
-                ->where('item_id', $itemId)
+                ->where('purchase_invoice_items.item_id', $itemId)
                 ->whereNull('purchase_invoices.deleted_at')
-                ->when($locationId, fn($q) => $q->where('location_id', $locationId))
-                ->where('invoice_date', '<', $from)
-                ->sum('quantity');
+                ->where('purchase_invoices.invoice_date', '<', $from)
+                ->sum('purchase_invoice_items.quantity');
 
-            $opSale = DB::table('sale_invoice_items')
+            $opSold = DB::table('sale_invoice_items')
                 ->join('sale_invoices', 'sale_invoice_items.sale_invoice_id', '=', 'sale_invoices.id')
-                ->where('product_id', $itemId)
+                ->where('sale_invoice_items.product_id', $itemId)
                 ->whereNull('sale_invoices.deleted_at')
-                ->when($locationId, fn($q) => $q->where('location_id', $locationId))
-                ->where('date', '<', $from)
-                ->sum('quantity');
+                ->where('sale_invoices.date', '<', $from)
+                ->sum('sale_invoice_items.quantity');
 
-            $opTransIn = DB::table('stock_transfer_details')
-                ->join('stock_transfers', 'stock_transfer_details.transfer_id', '=', 'stock_transfers.id')
-                ->where('product_id', $itemId)
-                ->whereNull('stock_transfers.deleted_at')
-                ->when($locationId, fn($q) => $q->where('to_location_id', $locationId))
-                ->where('date', '<', $from)
-                ->sum('quantity');
+            $opPurchaseReturned = DB::table('purchase_return_items')
+                ->join('purchase_returns', 'purchase_return_items.purchase_return_id', '=', 'purchase_returns.id')
+                ->where('purchase_return_items.item_id', $itemId)
+                ->where('purchase_returns.return_date', '<', $from)
+                ->sum('purchase_return_items.quantity');
 
-            $opTransOut = DB::table('stock_transfer_details')
-                ->join('stock_transfers', 'stock_transfer_details.transfer_id', '=', 'stock_transfers.id')
-                ->where('product_id', $itemId)
-                ->whereNull('stock_transfers.deleted_at')
-                ->when($locationId, fn($q) => $q->where('from_location_id', $locationId))
-                ->where('date', '<', $from)
-                ->sum('quantity');
+            $opSaleReturned = DB::table('sale_return_items')
+                ->join('sale_returns', 'sale_return_items.sale_return_id', '=', 'sale_returns.id')
+                ->where('sale_return_items.product_id', $itemId)
+                ->where('sale_returns.return_date', '<', $from)
+                ->sum('sale_return_items.qty');
 
-            $openingQty = ($opPurchase + $opTransIn) - ($opSale + $opTransOut);
+            $openingQty = ((float)$opPurchased + (float)$opSaleReturned)
+                        - ((float)$opSold      + (float)$opPurchaseReturned);
 
-            // 2. Current Period Transactions
             $purchases = DB::table('purchase_invoice_items')
                 ->join('purchase_invoices', 'purchase_invoice_items.purchase_invoice_id', '=', 'purchase_invoices.id')
-                ->select('invoice_date as date', DB::raw("'Purchase' as type"), 'invoice_no as description', 'quantity as qty_in', DB::raw("0 as qty_out"))
-                ->where('item_id', $itemId)
+                ->select(
+                    'purchase_invoices.invoice_date as date',
+                    DB::raw("'Purchase' as type"),
+                    DB::raw("CONCAT('PI-', purchase_invoices.invoice_no) as description"),
+                    'purchase_invoice_items.quantity as qty_in',
+                    DB::raw('0 as qty_out')
+                )
+                ->where('purchase_invoice_items.item_id', $itemId)
                 ->whereNull('purchase_invoices.deleted_at')
-                ->when($locationId, fn($q) => $q->where('location_id', $locationId))
-                ->whereBetween('invoice_date', [$from, $to]);
+                ->whereBetween('purchase_invoices.invoice_date', [$from, $to]);
 
             $sales = DB::table('sale_invoice_items')
                 ->join('sale_invoices', 'sale_invoice_items.sale_invoice_id', '=', 'sale_invoices.id')
-                ->select('date', DB::raw("'Sale' as type"), 'invoice_no as description', DB::raw("0 as qty_in"), 'quantity as qty_out')
-                ->where('product_id', $itemId)
+                ->select(
+                    'sale_invoices.date as date',
+                    DB::raw("'Sale' as type"),
+                    DB::raw("CONCAT('SI-', sale_invoices.invoice_no) as description"),
+                    DB::raw('0 as qty_in'),
+                    'sale_invoice_items.quantity as qty_out'
+                )
+                ->where('sale_invoice_items.product_id', $itemId)
                 ->whereNull('sale_invoices.deleted_at')
-                ->when($locationId, fn($q) => $q->where('location_id', $locationId))
-                ->whereBetween('date', [$from, $to]);
+                ->whereBetween('sale_invoices.date', [$from, $to]);
 
-            $transIn = DB::table('stock_transfer_details')
-                ->join('stock_transfers', 'stock_transfer_details.transfer_id', '=', 'stock_transfers.id')
-                ->select('date', DB::raw("'Transfer IN' as type"), DB::raw("'Internal Movement' as description"), 'quantity as qty_in', DB::raw("0 as qty_out"))
-                ->where('product_id', $itemId)
-                ->whereNull('stock_transfers.deleted_at')
-                ->when($locationId, fn($q) => $q->where('to_location_id', $locationId))
-                ->whereBetween('date', [$from, $to]);
+            $purchaseReturns = DB::table('purchase_return_items')
+                ->join('purchase_returns', 'purchase_return_items.purchase_return_id', '=', 'purchase_returns.id')
+                ->select(
+                    'purchase_returns.return_date as date',
+                    DB::raw("'Purchase Return' as type"),
+                    DB::raw("CONCAT('PR-', purchase_returns.id) as description"),
+                    DB::raw('0 as qty_in'),
+                    'purchase_return_items.quantity as qty_out'
+                )
+                ->where('purchase_return_items.item_id', $itemId)
+                ->whereBetween('purchase_returns.return_date', [$from, $to]);
 
-            $transOut = DB::table('stock_transfer_details')
-                ->join('stock_transfers', 'stock_transfer_details.transfer_id', '=', 'stock_transfers.id')
-                ->select('date', DB::raw("'Transfer OUT' as type"), DB::raw("'Internal Movement' as description"), DB::raw("0 as qty_in"), 'quantity as qty_out')
-                ->where('product_id', $itemId)
-                ->whereNull('stock_transfers.deleted_at')
-                ->when($locationId, fn($q) => $q->where('from_location_id', $locationId))
-                ->whereBetween('date', [$from, $to]);
+            $saleReturns = DB::table('sale_return_items')
+                ->join('sale_returns', 'sale_return_items.sale_return_id', '=', 'sale_returns.id')
+                ->select(
+                    'sale_returns.return_date as date',
+                    DB::raw("'Sale Return' as type"),
+                    DB::raw("CONCAT('SR-', sale_returns.id) as description"),
+                    'sale_return_items.qty as qty_in',
+                    DB::raw('0 as qty_out')
+                )
+                ->where('sale_return_items.product_id', $itemId)
+                ->whereBetween('sale_returns.return_date', [$from, $to]);
 
-            $itemLedger = $purchases->union($sales)->union($transIn)->union($transOut)
+            $itemLedger = $purchases
+                ->union($sales)
+                ->union($purchaseReturns)
+                ->union($saleReturns)
                 ->orderBy('date', 'asc')
                 ->get()
-                ->map(fn($item) => (array) $item);
+                ->map(fn($row) => (array) $row);
         }
 
-        // ================= STOCK IN HAND (LOT WISE) =================
-        if ($tab == 'SR') {
-            $stockInHand = \App\Models\StockLot::with(['product.measurementUnit', 'variation', 'location'])
-                ->when($itemId, fn($q) => $q->where('product_id', $itemId))
-                ->when($locationId, fn($q) => $q->where('location_id', $locationId))
-                ->where('quantity', '>', 0)
-                ->get()
-                ->map(function ($lot) {
-                    return [
-                        'product'    => $lot->product->name ?? 'N/A',
-                        'variation'  => $lot->variation->sku ?? 'Standard',
-                        'location'   => $lot->location->name ?? 'N/A',
-                        'lot_number' => $lot->lot_number,
-                        'quantity'   => $lot->quantity,
-                        'unit'       => $lot->product->measurementUnit->shortcode ?? '',
-                        'created_at' => $lot->created_at->format('d-M-Y'),
-                    ];
-                });
-        }
+        // ================================================================
+        // TAB 2 — STOCK IN HAND
+        //
+        // ROOT CAUSE OF BUG:
+        //   The previous query did INNER JOIN on product_variations.
+        //   A product purchased with variation_id = null has NO rows in
+        //   product_variations, so the inner join returned 0 rows → empty.
+        //
+        // FIX:
+        //   Query at the product level, not the variation level.
+        //   - Products with NO variations: one row, stock = all purchases.
+        //   - Products WITH variations: one row per variation, PLUS a
+        //     catch-all "No Variation" row for any purchases/sales where
+        //     variation_id was left null.
+        // ================================================================
+        if ($tab === 'SR') {
 
-        // ================= STOCK TRANSFERS =================
-        if ($tab == 'STR') {
-            $stockTransfers = DB::table('stock_transfers')
-                ->join('stock_transfer_details', 'stock_transfers.id', '=', 'stock_transfer_details.transfer_id')
-                ->join('products', 'stock_transfer_details.product_id', '=', 'products.id')
-                ->join('locations as from_loc', 'stock_transfers.from_location_id', '=', 'from_loc.id')
-                ->join('locations as to_loc', 'stock_transfers.to_location_id', '=', 'to_loc.id')
-                ->select(
-                    'stock_transfers.date',
-                    'stock_transfers.id as reference',
-                    'products.name as product',
-                    'from_loc.name as from',
-                    'to_loc.name as to',
-                    'stock_transfer_details.quantity'
-                )
-                ->whereNull('stock_transfers.deleted_at')
-                ->whereBetween('stock_transfers.date', [$from, $to])
-                ->when($request->from_location_id, fn($q) => $q->where('stock_transfers.from_location_id', $request->from_location_id))
-                ->when($request->to_location_id,   fn($q) => $q->where('stock_transfers.to_location_id', $request->to_location_id))
-                ->get()
-                ->map(fn($item) => (array) $item);
-        }
+            $productQuery = Product::with('variations')
+                ->leftJoin('measurement_units', 'measurement_units.id', '=', 'products.measurement_unit')
+                ->select('products.*', 'measurement_units.shortcode as unit_shortcode')
+                ->orderBy('products.name');
 
-        // ================= LOT WISE STOCK REPORT =================
-        if ($tab == 'LWS') {
-            $lotNumber = $request->get('lot_number');
+            if ($itemId) {
+                $productQuery->where('products.id', $itemId);
+            }
 
-            // Section A: Current stock per lot per location (excluding vendor/customer locations)
-            $lotWiseStock = \App\Models\StockLot::with(['product.measurementUnit', 'variation', 'location'])
-                ->when($itemId,    fn($q) => $q->where('product_id', $itemId))
-                ->when($locationId, fn($q) => $q->where('location_id', $locationId))
-                ->when($lotNumber,  fn($q) => $q->where('lot_number', $lotNumber))
-                ->where('quantity', '>', 0)
-                ->get()
-                ->map(function ($lot) {
-                    return [
-                        'product'    => $lot->product->name ?? 'N/A',
-                        'variation'  => $lot->variation->sku ?? 'Standard',
-                        'location'   => $lot->location->name ?? 'N/A',
-                        'lot_number' => $lot->lot_number,
-                        'quantity'   => $lot->quantity,
-                        'unit'       => $lot->product->measurementUnit->shortcode ?? '',
-                        'created_at' => $lot->created_at->format('d-M-Y'),
-                    ];
-                });
+            $productRows = $productQuery->get();
 
-            // Section B: Transfer movement ledger — query lot_number directly from stock_transfer_details
-            if ($lotNumber) {
-                $lotWiseLedger = DB::table('stock_transfer_details')
-                    ->join('stock_transfers', 'stock_transfer_details.transfer_id', '=', 'stock_transfers.id')
-                    ->join('products', 'stock_transfer_details.product_id', '=', 'products.id')
-                    ->join('locations as from_loc', 'stock_transfers.from_location_id', '=', 'from_loc.id')
-                    ->join('locations as to_loc', 'stock_transfers.to_location_id', '=', 'to_loc.id')
-                    ->select(
-                        'stock_transfers.date',
-                        'stock_transfers.id as reference',
-                        'products.name as product',
-                        'stock_transfer_details.lot_number',
-                        'from_loc.name as from_location',
-                        'to_loc.name as to_location',
-                        'stock_transfer_details.quantity'
-                    )
-                    ->whereNull('stock_transfers.deleted_at')
-                    ->where('stock_transfer_details.lot_number', $lotNumber)
-                    ->when($itemId, fn($q) => $q->where('stock_transfer_details.product_id', $itemId))
-                    ->whereBetween('stock_transfers.date', [$from, $to])
-                    ->orderBy('stock_transfers.date', 'asc')
-                    ->get()
-                    ->map(fn($item) => (array) $item);
+            foreach ($productRows as $product) {
+
+                $hasVariations = $product->variations->isNotEmpty();
+
+                if (!$hasVariations) {
+
+                    // ── No variations: sum ALL rows for this product ───
+                    $purchased = (float) DB::table('purchase_invoice_items')
+                        ->join('purchase_invoices', 'purchase_invoice_items.purchase_invoice_id', '=', 'purchase_invoices.id')
+                        ->where('purchase_invoice_items.item_id', $product->id)
+                        ->whereNull('purchase_invoices.deleted_at')
+                        ->sum('purchase_invoice_items.quantity');
+
+                    $sold = (float) DB::table('sale_invoice_items')
+                        ->join('sale_invoices', 'sale_invoice_items.sale_invoice_id', '=', 'sale_invoices.id')
+                        ->where('sale_invoice_items.product_id', $product->id)
+                        ->whereNull('sale_invoices.deleted_at')
+                        ->sum('sale_invoice_items.quantity');
+
+                    $purchaseReturned = (float) DB::table('purchase_return_items')
+                        ->where('item_id', $product->id)
+                        ->sum('quantity');
+
+                    $saleReturned = (float) DB::table('sale_return_items')
+                        ->where('product_id', $product->id)
+                        ->sum('qty');
+
+                    $qty = ($purchased + $saleReturned) - ($sold + $purchaseReturned);
+
+                    if ($qty > 0) {
+                        $stockInHand->push([
+                            'product'   => $product->name,
+                            'variation' => '—',
+                            'quantity'  => $qty,
+                            'unit'      => $product->unit_shortcode ?? '',
+                        ]);
+                    }
+
+                } else {
+
+                    // ── Has variations ─────────────────────────────────
+
+                    // Catch-all row: purchases/sales where variation_id is null
+                    $nullQtyIn = (float) DB::table('purchase_invoice_items')
+                        ->join('purchase_invoices', 'purchase_invoice_items.purchase_invoice_id', '=', 'purchase_invoices.id')
+                        ->where('purchase_invoice_items.item_id', $product->id)
+                        ->whereNull('purchase_invoice_items.variation_id')
+                        ->whereNull('purchase_invoices.deleted_at')
+                        ->sum('purchase_invoice_items.quantity');
+
+                    $nullQtyOut = (float) DB::table('sale_invoice_items')
+                        ->join('sale_invoices', 'sale_invoice_items.sale_invoice_id', '=', 'sale_invoices.id')
+                        ->where('sale_invoice_items.product_id', $product->id)
+                        ->whereNull('sale_invoice_items.variation_id')
+                        ->whereNull('sale_invoices.deleted_at')
+                        ->sum('sale_invoice_items.quantity');
+
+                    $nullPR = (float) DB::table('purchase_return_items')
+                        ->where('item_id', $product->id)->whereNull('variation_id')->sum('quantity');
+
+                    $nullSR = (float) DB::table('sale_return_items')
+                        ->where('product_id', $product->id)->whereNull('variation_id')->sum('qty');
+
+                    $nullQty = ($nullQtyIn + $nullSR) - ($nullQtyOut + $nullPR);
+
+                    if ($nullQty > 0) {
+                        $stockInHand->push([
+                            'product'   => $product->name,
+                            'variation' => 'No Variation',
+                            'quantity'  => $nullQty,
+                            'unit'      => $product->unit_shortcode ?? '',
+                        ]);
+                    }
+
+                    // One row per variation
+                    foreach ($product->variations as $v) {
+
+                        $vPurchased = (float) DB::table('purchase_invoice_items')
+                            ->join('purchase_invoices', 'purchase_invoice_items.purchase_invoice_id', '=', 'purchase_invoices.id')
+                            ->where('purchase_invoice_items.item_id', $product->id)
+                            ->where('purchase_invoice_items.variation_id', $v->id)
+                            ->whereNull('purchase_invoices.deleted_at')
+                            ->sum('purchase_invoice_items.quantity');
+
+                        $vSold = (float) DB::table('sale_invoice_items')
+                            ->join('sale_invoices', 'sale_invoice_items.sale_invoice_id', '=', 'sale_invoices.id')
+                            ->where('sale_invoice_items.product_id', $product->id)
+                            ->where('sale_invoice_items.variation_id', $v->id)
+                            ->whereNull('sale_invoices.deleted_at')
+                            ->sum('sale_invoice_items.quantity');
+
+                        $vPR = (float) DB::table('purchase_return_items')
+                            ->where('item_id', $product->id)->where('variation_id', $v->id)->sum('quantity');
+
+                        $vSR = (float) DB::table('sale_return_items')
+                            ->where('product_id', $product->id)->where('variation_id', $v->id)->sum('qty');
+
+                        $vQty = ($vPurchased + $vSR) - ($vSold + $vPR);
+
+                        if ($vQty > 0) {
+                            $stockInHand->push([
+                                'product'   => $product->name,
+                                'variation' => $v->sku ?? $v->name ?? '—',
+                                'quantity'  => $vQty,
+                                'unit'      => $product->unit_shortcode ?? '',
+                            ]);
+                        }
+                    }
+                }
             }
         }
 
         return view('reports.inventory_reports', compact(
             'products',
-            'locations',
             'itemLedger',
             'openingQty',
             'stockInHand',
-            'stockTransfers',
             'tab',
             'from',
-            'to',
-            'lotWiseStock',
-            'lotWiseLedger'
+            'to'
         ));
     }
 }
