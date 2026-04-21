@@ -153,7 +153,7 @@
                                 {{-- FIX: standardized type list --}}
                                 <div class="col-lg-6 mb-2">
                                     <label>Account Type</label>
-                                    <select class="form-control select2-js" name="account_type">
+                                    <select data-plugin-selecttwo class="form-control select2-js" name="account_type">
                                         <option value="" disabled selected>Select Account Type</option>
                                         @foreach($accountTypes as $value => $label)
                                             <option value="{{ $value }}">{{ $label }}</option>
@@ -163,7 +163,7 @@
 
                                 <div class="col-lg-6 mb-2">
                                     <label>Sub-head of Account <span class="text-danger">*</span></label>
-                                    <select class="form-control select2-js" name="shoa_id" required>
+                                    <select data-plugin-selecttwo class="form-control select2-js" name="shoa_id" required>
                                         <option value="" disabled selected>Select Sub-head</option>
                                         @foreach($subHeadOfAccounts as $row)
                                             <option value="{{ $row->id }}">{{ $row->name }}</option>
@@ -250,7 +250,7 @@
                                 {{-- FIX: same type list, pre-select handled by JS --}}
                                 <div class="col-lg-6 mb-2">
                                     <label>Account Type</label>
-                                    <select id="edit_account_type" class="form-control select2-js"
+                                    <select data-plugin-selecttwo id="edit_account_type" class="form-control select2-js"
                                             name="account_type">
                                         <option value="" disabled>Select Account Type</option>
                                         @foreach($accountTypes as $value => $label)
