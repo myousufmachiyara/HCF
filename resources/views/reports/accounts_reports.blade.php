@@ -247,13 +247,6 @@
                                            target="_blank" class="voucher-link" title="Print voucher">
                                             {{ $ref }}
                                         </a>
-                                        <span class="no-print ms-1">
-                                            <a href="{{ route('vouchers.index', ['type' => 'journal']) }}#{{ $vid }}"
-                                               class="report-action-btn btn btn-outline-secondary btn-sm"
-                                               title="View voucher">
-                                                <i class="fas fa-eye"></i>
-                                            </a>
-                                        </span>
                                     @else
                                         <span class="text-muted fst-italic">{{ $ref }}</span>
                                     @endif
