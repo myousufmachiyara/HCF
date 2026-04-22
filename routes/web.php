@@ -33,7 +33,8 @@ Route::middleware(['auth'])->group(function () {
 
     Route::put('/users/{id}/change-password', [UserController::class, 'changePassword'])->name('users.changePassword');
     Route::put('/users/{id}/toggle-active', [UserController::class, 'toggleActive'])->name('users.toggleActive');
-
+    Route::post('/change-my-password', [UserController::class, 'changeMyPassword'])->name('users.changeMyPassword');
+    
     // Product Helpers
     Route::get('/products/details', [ProductController::class, 'details'])->name('products.receiving');
     Route::get('/product/{product}/variations', [ProductController::class, 'getVariations'])->name('product.variations');

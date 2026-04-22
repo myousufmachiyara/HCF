@@ -130,6 +130,27 @@ class UserController extends Controller
         return redirect()->route('users.index')->with('success', 'Password changed successfully.');
     }
 
+    public function changeMyPassword(Request $request)
+    {
+        $request->validate([
+            'current_password'     => 'required|string',
+            'new_password'         => 'required|string|min:8',
+            'confirm_new_password' => 'required|string|same:new_password',
+        ]);
+    
+        $user = auth()->user();
+    
+        // Verify current password
+        if (!Hash::check($request->current_password, $user->password)) {
+            return back()->withErrors(['current_password' => 'Current password is incorrect.']);
+        }
+    
+        $user->password = Hash::make($request->new_password);
+        $user->save();
+    
+        return back()->with('success', 'Password changed successfully.');
+    }
+
     public function toggleActive($id)
     {
         $user = User::findOrFail($id);

@@ -156,6 +156,7 @@ class AccountsReportController extends Controller
             $from,
             $account->name,
             'Opening Balance',
+            '',                                  // narration
             $this->fmt($opData['debit']),
             $this->fmt($opData['credit']),
             $this->fmt($runningBal),
@@ -172,10 +173,12 @@ class AccountsReportController extends Controller
 
             $runningBal += $isDebitNat ? ($dr - $cr) : ($cr - $dr);
 
+            // FIX 1: include remarks as narration
             $rows->push([
                 $v->date,
                 $account->name,
                 "Voucher #{$v->id}",
+                $v->remarks ?? '',               // narration
                 $this->fmt($dr),
                 $this->fmt($cr),
                 $this->fmt($runningBal),
@@ -209,6 +212,7 @@ class AccountsReportController extends Controller
             $from,
             $account->name,
             'Opening Balance',
+            '',                                   // narration
             0,
             0,
             $this->fmt($runningBal),
@@ -232,6 +236,7 @@ class AccountsReportController extends Controller
                 $v->date,
                 '',
                 "Voucher #{$v->id} — " . ($isDr ? 'Debit' : 'Credit'),
+                $v->remarks ?? '',                // narration
                 $drAmount,
                 $crAmount,
                 $this->fmt($runningBal),
@@ -432,6 +437,7 @@ class AccountsReportController extends Controller
                 $v->date,
                 $v->debitAccount->name  ?? '—',
                 $v->creditAccount->name ?? '—',
+                $v->remarks ?? '',               // narration
                 $this->fmt($dr),
                 $this->fmt($cr),
                 $this->fmt($bal),
@@ -468,6 +474,7 @@ class AccountsReportController extends Controller
                 "Voucher #{$v->id}",
                 $v->debitAccount->name  ?? 'N/A',
                 $v->creditAccount->name ?? 'N/A',
+                $v->remarks ?? '',               // narration
                 $this->fmt($v->amount),
             ]);
     }

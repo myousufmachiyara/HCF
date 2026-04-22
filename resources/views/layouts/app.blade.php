@@ -87,36 +87,43 @@
         </div>
         
         <div id="changePassword" class="zoom-anim-dialog modal-block modal-block-danger mfp-hide">
-            <form id="changePasswordForm" method="post" style="width: 75%" enctype="multipart/form-data" onkeydown="return event.key != 'Enter';">
-                @csrf
-                <header class="card-header">
-                    <h2 class="card-title">Change Password</h2>
-                </header>
-                <div class="card-body">
-                    <div class="row form-group">    
-                        <div class="col-12 mb-2">
-                            <label>Current Password</label>
-                            <input type="password" class="form-control" placeholder="Current Password" id="current_password" name="current_password" required>
-                        </div> 
-                        <div class="col-12 mb-2">
-                            <label>New Password</label>
-                            <input type="password" class="form-control" placeholder="New Password" id="new_password" minlength="8" name="new_password" required>
-                        </div>
-                        <div class="col-12 mb-2">
-                            <label>Confirm New Password</label>
-                            <input type="password" class="form-control" placeholder="Confirm New Password" minlength="8" id="confirm_new_password" required>
+            <section class="card">
+                <form id="changePasswordForm" onkeydown="return event.key != 'Enter';">
+                    @csrf
+                    <header class="card-header">
+                        <h2 class="card-title">Change Password</h2>
+                    </header>
+                    <div class="card-body">
+                        <div id="cp-alert" class="alert d-none mb-2"></div>
+                        <div class="row form-group">
+                            <div class="col-12 mb-2">
+                                <label>Current Password</label>
+                                <input type="password" class="form-control" name="current_password"
+                                    id="current_password" placeholder="Current Password" required>
+                            </div>
+                            <div class="col-12 mb-2">
+                                <label>New Password</label>
+                                <input type="password" class="form-control" name="new_password"
+                                    id="new_password" placeholder="New Password (min 8 chars)" minlength="8" required>
+                            </div>
+                            <div class="col-12 mb-2">
+                                <label>Confirm New Password</label>
+                                {{-- FIX: field name must be new_password_confirmation for 'confirmed' rule --}}
+                                <input type="password" class="form-control" name="new_password_confirmation"
+                                    id="new_password_confirmation" placeholder="Confirm New Password" minlength="8" required>
+                            </div>
                         </div>
                     </div>
-                </div>
-                <footer class="card-footer">
-                    <div class="row">
-                        <div class="col-md-12 text-end">
-                            <button type="submit" class="btn btn-primary">Change Password</button>
-                            <button type="button" class="btn btn-default modal-dismiss">Cancel</button>
+                    <footer class="card-footer">
+                        <div class="row">
+                            <div class="col-md-12 text-end">
+                                <button type="submit" id="cp-submit-btn" class="btn btn-primary">Change Password</button>
+                                <button type="button" class="btn btn-default modal-dismiss">Cancel</button>
+                            </div>
                         </div>
-                    </div>
-                </footer>
-            </form>
+                    </footer>
+                </form>
+            </section>
         </div>
 
         <header class="page-header">
@@ -198,5 +205,6 @@
                 </div>
             </div>
         </footer>
+
     </body>
 </html>
