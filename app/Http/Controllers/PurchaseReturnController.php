@@ -309,7 +309,7 @@ class PurchaseReturnController extends Controller
         $pdf->setCellPadding(1.5);
 
         // Logo
-        $logoPath = public_path('assets/img/billtrix-logo-black.png');
+        $logoPath = public_path('assets/img/logo.png');
         if (file_exists($logoPath)) {
             $pdf->Image($logoPath, 8, 10, 40);
         }
