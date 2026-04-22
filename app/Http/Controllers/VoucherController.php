@@ -183,7 +183,7 @@ class VoucherController extends Controller
         $pdf->setCellPadding(1.5);
 
         // --- Company Header ---
-        $logoPath = public_path('assets/img/logo.jpg');
+        $logoPath = public_path('assets/img/logo.png');
 
         // Logo (Top Left)
         if (file_exists($logoPath)) {
