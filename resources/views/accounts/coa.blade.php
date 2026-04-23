@@ -90,15 +90,7 @@
                                     <td><code>{{ $item->account_code }}</code></td>
                                     <td><strong>{{ $item->name }}</strong></td>
                                     <td>{{ $item->subHeadOfAccount->name ?? '—' }}</td>
-                                    {{-- FIX: show human-readable label, not raw db value --}}
-                                    <td>
-                                        <span class="badge"
-                                            style="background:var(--color-background-secondary);
-                                                    color:var(--color-text-secondary);
-                                                    padding:2px 7px;border-radius:20px;">
-                                            {{ $accountTypes[$item->account_type] ?? ucfirst($item->account_type ?? '—') }}
-                                        </span>
-                                    </td>
+                                    <td><strong>{{ $accountTypes[$item->account_type] ?? ucfirst($item->account_type ?? '—') }}</strong></td>
                                     <td>{{ $item->contact_no ?? '—' }}</td>
                                     <td>{{ \Carbon\Carbon::parse($item->opening_date)->format('d-m-Y') }}</td>
                                     <td>{{ $item->remarks ?? '—' }}</td>
