@@ -95,7 +95,7 @@
                                         <span class="badge"
                                             style="background:var(--color-background-secondary);
                                                     color:var(--color-text-secondary);
-                                                    font-size:11px;padding:2px 7px;border-radius:20px;">
+                                                    padding:2px 7px;border-radius:20px;">
                                             {{ $accountTypes[$item->account_type] ?? ucfirst($item->account_type ?? '—') }}
                                         </span>
                                     </td>
