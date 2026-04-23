@@ -184,17 +184,19 @@ class COAController extends Controller
     {
         try {
             $account = ChartOfAccounts::findOrFail($id);
+
+            // Guard: block deletion of core system accounts
+            $systemCodes = ['101001','102001','104001','201001','202001','301001','401001','402001','501001'];
+            if (in_array($account->account_code, $systemCodes)) {
+                return redirect()->back()
+                    ->with('error', 'System account "' . $account->name . '" cannot be deleted.');
+            }
+
             $account->delete();
-
-            Log::info('[COA] Account deleted', ['id' => $id, 'user' => auth()->id()]);
-
-            return redirect()->route('coa.index')
-                ->with('success', 'Account deleted successfully.');
+            return redirect()->route('coa.index')->with('success', 'Account deleted successfully.');
 
         } catch (\Exception $e) {
-            Log::error('[COA] Delete error', ['message' => $e->getMessage()]);
-            return redirect()->back()
-                ->with('error', 'Error deleting account: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Error: ' . $e->getMessage());
         }
     }
 }
