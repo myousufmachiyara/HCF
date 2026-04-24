@@ -132,23 +132,44 @@ class UserController extends Controller
 
     public function changeMyPassword(Request $request)
     {
-        $request->validate([
+        // Validate — note: 'same' rule compares to another field in the request,
+        // not to a Laravel 'confirmed' convention. This matches the form field names.
+        $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
             'current_password'     => 'required|string',
             'new_password'         => 'required|string|min:8',
-            'confirm_new_password' => 'required|string|same:new_password',
+            'new_password_confirmation' => 'required|string|same:new_password',
+        ], [
+            'new_password.min'                  => 'New password must be at least 8 characters.',
+            'new_password_confirmation.same'    => 'Passwords do not match.',
+            'current_password.required'         => 'Please enter your current password.',
         ]);
+    
+        // Return JSON so the AJAX handler in app.blade.php can read it
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors'  => $validator->errors()->all(),
+            ], 422);
+        }
     
         $user = auth()->user();
     
-        // Verify current password
         if (!Hash::check($request->current_password, $user->password)) {
-            return back()->withErrors(['current_password' => 'Current password is incorrect.']);
+            return response()->json([
+                'success' => false,
+                'errors'  => ['Current password is incorrect.'],
+            ], 422);
         }
     
         $user->password = Hash::make($request->new_password);
         $user->save();
     
-        return back()->with('success', 'Password changed successfully.');
+        Log::info('[Auth] Password changed', ['user_id' => $user->id]);
+    
+        return response()->json([
+            'success' => true,
+            'message' => 'Password changed successfully.',
+        ]);
     }
 
     public function toggleActive($id)
