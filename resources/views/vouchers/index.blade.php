@@ -195,10 +195,21 @@
 
 <style>
 /* ── Prevent background scroll when any modal is open ──────────── */
+/*
+   overflow:hidden on body alone is not enough because this Porto
+   theme sets overflow on several nested containers. We must block
+   scroll on every element that can independently scroll.
+*/
 body.modal-open-noscroll {
     overflow: hidden !important;
-    /* Reserve scrollbar width to avoid content jump */
-    padding-right: var(--scrollbar-width, 0px);
+    padding-right: var(--scrollbar-width, 0px); /* prevent layout jump */
+}
+body.modal-open-noscroll section.body,
+body.modal-open-noscroll .inner-wrapper,
+body.modal-open-noscroll .content-body,
+body.modal-open-noscroll main,
+body.modal-open-noscroll .page-wrapper {
+    overflow: hidden !important;
 }
 
 /* ── Ensure the mfp overlay sits above everything ─────────────── */
@@ -250,11 +261,25 @@ body.modal-open-noscroll {
         var sw = getScrollbarWidth();
         document.documentElement.style.setProperty('--scrollbar-width', sw + 'px');
         document.body.classList.add('modal-open-noscroll');
+        // Belt-and-suspenders: block wheel events on the document itself
+        // so no scrollable container underneath the overlay can respond
+        document.addEventListener('wheel', preventScroll, { passive: false });
+        document.addEventListener('touchmove', preventScroll, { passive: false });
     }
 
     function unlockScroll() {
         document.body.classList.remove('modal-open-noscroll');
         document.documentElement.style.removeProperty('--scrollbar-width');
+        document.removeEventListener('wheel', preventScroll);
+        document.removeEventListener('touchmove', preventScroll);
+    }
+
+    // Allows scrolling INSIDE the modal content, blocks everything else
+    function preventScroll(e) {
+        var mfpContent = document.querySelector('.mfp-content');
+        // If the scroll target is inside the modal content, allow it
+        if (mfpContent && mfpContent.contains(e.target)) return;
+        e.preventDefault();
     }
 
     function trapFocus(modalEl) {
