@@ -3,6 +3,20 @@
 @section('title', ucfirst($type) . ' Vouchers')
 
 @section('content')
+
+@if(session('success'))
+    <div class="alert alert-success alert-dismissible">
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        {{ session('success') }}
+    </div>
+@endif
+@if(session('error'))
+    <div class="alert alert-danger alert-dismissible">
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        {{ session('error') }}
+    </div>
+@endif
+
 <div class="row">
   <div class="col">
     <section class="card">
@@ -37,9 +51,29 @@
                   <td>{{ $row->remarks }}</td>
                   <td><strong>{{ number_format($row->amount, 0, '.', ',') }}</strong></td>
                   <td class="actions">
-                    <a class="text-success" href="{{ route('vouchers.print', ['type' => $type, 'id' => $row->id]) }}" target="_blank"><i class="fas fa-print"></i></a>
-                    <a class="text-primary modal-with-form" onclick="getVoucherDetails({{ $row->id }})" href="#updateModal"><i class="fas fa-edit"></i></a>
-                    <a class="btn btn-link p-0 m-0 text-danger" onclick="setDeleteId({{ $row->id }})" href="#deleteModal"><i class="fas fa-trash-alt"></i></a>
+                    <a class="text-success me-1"
+                       href="{{ route('vouchers.print', ['type' => $type, 'id' => $row->id]) }}"
+                       target="_blank" title="Print">
+                        <i class="fas fa-print"></i>
+                    </a>
+                    {{-- FIX: use javascript:void(0) + openEditModal() instead of
+                         href="#updateModal" + modal-with-form. The theme's
+                         modal-with-form handler doesn't set the form action,
+                         so edits always posted to the wrong URL. --}}
+                    <a class="text-primary me-1"
+                       href="javascript:void(0)"
+                       onclick="openEditModal({{ $row->id }})"
+                       title="Edit">
+                        <i class="fas fa-edit"></i>
+                    </a>
+                    {{-- FIX: delete was using <a href="#deleteModal"> without
+                         modal-with-form class so Magnific never opened it. --}}
+                    <a class="text-danger"
+                       href="javascript:void(0)"
+                       onclick="openDeleteModal({{ $row->id }})"
+                       title="Delete">
+                        <i class="fas fa-trash-alt"></i>
+                    </a>
                   </td>
                 </tr>
               @endforeach
@@ -49,10 +83,10 @@
       </div>
     </section>
 
-    {{-- ── ADD MODAL ──────────────────────────────────────────────── --}}
+    {{-- ADD MODAL --}}
     <div id="addModal" class="modal-block modal-block-primary mfp-hide">
       <section class="card">
-        <form method="post" action="{{ route('vouchers.store', $type) }}"
+        <form method="POST" action="{{ route('vouchers.store', $type) }}"
               enctype="multipart/form-data" onkeydown="return event.key != 'Enter';">
           @csrf
           <input type="hidden" name="voucher_type" value="{{ $type }}">
@@ -106,31 +140,30 @@
       </section>
     </div>
 
-    {{-- ── UPDATE MODAL ────────────────────────────────────────────── --}}
-    <div id="updateModal" class="modal-block modal-block-primary mfp-hide">
+    {{-- EDIT MODAL --}}
+    <div id="editModal" class="modal-block modal-block-primary mfp-hide">
       <section class="card">
-        <form method="POST" id="updateForm" enctype="multipart/form-data"
+        <form method="POST" id="editForm"
+              enctype="multipart/form-data"
               onkeydown="return event.key != 'Enter';">
           @csrf
           @method('PUT')
           <input type="hidden" name="voucher_type" value="{{ $type }}">
           <header class="card-header">
-            <h2 class="card-title">Update {{ ucfirst($type) }} Voucher</h2>
+            <h2 class="card-title">
+                Edit {{ ucfirst($type) }} Voucher
+                <small class="text-muted" id="edit_voucher_label"></small>
+            </h2>
           </header>
           <div class="card-body">
             <div class="row">
               <div class="col-lg-6 mb-2">
-                <label>Voucher ID</label>
-                <input type="text" class="form-control" id="update_id" disabled>
-                <input type="hidden" name="voucher_id" id="update_id_hidden">
-              </div>
-              <div class="col-lg-6 mb-2">
                 <label>Date</label>
-                <input type="date" class="form-control" name="date" id="update_date" required>
+                <input type="date" class="form-control" name="date" id="edit_date" required>
               </div>
               <div class="col-lg-6 mb-2">
                 <label>Account Debit <span class="text-danger">*</span></label>
-                <select class="form-control select2-js" name="ac_dr_sid" id="update_ac_dr_sid" required>
+                <select class="form-control select2-js" name="ac_dr_sid" id="edit_ac_dr_sid" required>
                   <option value="" disabled>Select Account</option>
                   @foreach($accounts as $acc)
                     <option value="{{ $acc->id }}">{{ $acc->name }}</option>
@@ -139,7 +172,7 @@
               </div>
               <div class="col-lg-6 mb-2">
                 <label>Account Credit <span class="text-danger">*</span></label>
-                <select class="form-control select2-js" name="ac_cr_sid" id="update_ac_cr_sid" required>
+                <select class="form-control select2-js" name="ac_cr_sid" id="edit_ac_cr_sid" required>
                   <option value="" disabled>Select Account</option>
                   @foreach($accounts as $acc)
                     <option value="{{ $acc->id }}">{{ $acc->name }}</option>
@@ -148,29 +181,28 @@
               </div>
               <div class="col-lg-6 mb-2">
                 <label>Amount <span class="text-danger">*</span></label>
-                <input type="number" class="form-control" name="amount"
-                       id="update_amount" step="any" required>
+                <input type="number" class="form-control" name="amount" id="edit_amount" step="any" required>
               </div>
               <div class="col-lg-6 mb-2">
-                <label>Attachments</label>
+                <label>Attachments <small class="text-muted">(leave blank to keep existing)</small></label>
                 <input type="file" class="form-control" name="att[]" multiple
                        accept=".zip,application/pdf,image/png,image/jpeg">
               </div>
               <div class="col-lg-12 mb-2">
                 <label>Remarks</label>
-                <textarea rows="3" class="form-control" name="remarks" id="update_remarks"></textarea>
+                <textarea rows="3" class="form-control" name="remarks" id="edit_remarks"></textarea>
               </div>
             </div>
           </div>
           <footer class="card-footer text-end">
-            <button type="submit" class="btn btn-primary">Update {{ ucfirst($type) }} Voucher</button>
+            <button type="submit" class="btn btn-primary">Update Voucher</button>
             <button type="button" class="btn btn-default modal-dismiss">Cancel</button>
           </footer>
         </form>
       </section>
     </div>
 
-    {{-- ── DELETE MODAL ────────────────────────────────────────────── --}}
+    {{-- DELETE MODAL --}}
     <div id="deleteModal" class="modal-block modal-block-warning mfp-hide">
       <section class="card">
         <form method="POST" id="deleteForm">
@@ -180,10 +212,14 @@
             <h2 class="card-title">Delete Voucher</h2>
           </header>
           <div class="card-body">
-            <p>Are you sure you want to delete this voucher?</p>
+            <p class="mb-0">
+                Are you sure you want to delete
+                <strong id="delete_voucher_label"></strong>?
+                This cannot be undone.
+            </p>
           </div>
           <footer class="card-footer text-end">
-            <button type="submit" class="btn btn-danger">Delete</button>
+            <button type="submit" class="btn btn-danger">Yes, Delete</button>
             <button type="button" class="btn btn-default modal-dismiss">Cancel</button>
           </footer>
         </form>
@@ -194,15 +230,9 @@
 </div>
 
 <style>
-/* ── Prevent background scroll when any modal is open ──────────── */
-/*
-   overflow:hidden on body alone is not enough because this Porto
-   theme sets overflow on several nested containers. We must block
-   scroll on every element that can independently scroll.
-*/
 body.modal-open-noscroll {
     overflow: hidden !important;
-    padding-right: var(--scrollbar-width, 0px); /* prevent layout jump */
+    padding-right: var(--scrollbar-width, 0px);
 }
 body.modal-open-noscroll section.body,
 body.modal-open-noscroll .inner-wrapper,
@@ -211,190 +241,135 @@ body.modal-open-noscroll main,
 body.modal-open-noscroll .page-wrapper {
     overflow: hidden !important;
 }
-
-/* ── Ensure the mfp overlay sits above everything ─────────────── */
 .mfp-wrap { z-index: 10000 !important; }
 .mfp-bg   { z-index: 9999  !important; }
 </style>
 
 <script>
-// ────────────────────────────────────────────────────────────────
-// FOCUS TRAP + SCROLL LOCK FOR MAGNIFIC POPUP MODALS
-//
-// Problems being solved:
-//   1. Tab key cycles focus through the background page, not the modal
-//   2. Mouse scroll wheel scrolls the background page behind the modal
-//   3. Keyboard focus is never moved into the modal on open
-//
-// Approach:
-//   - On mfp open:  lock body scroll, measure scrollbar width to avoid
-//     layout shift, move focus to the first focusable element in the modal
-//   - On Tab/Shift+Tab: intercept and keep focus inside the modal
-//   - On mfp close: restore scroll and remove keydown trap
-// ────────────────────────────────────────────────────────────────
+// ── Scroll lock helpers ──────────────────────────────────────────
+function getScrollbarWidth() {
+    var d = document.createElement('div');
+    d.style.cssText = 'width:100px;height:100px;overflow:scroll;position:absolute;top:-9999px';
+    document.body.appendChild(d);
+    var w = d.offsetWidth - d.clientWidth;
+    document.body.removeChild(d);
+    return w;
+}
+function preventScroll(e) {
+    var mc = document.querySelector('.mfp-content');
+    if (mc && mc.contains(e.target)) return;
+    e.preventDefault();
+}
+function lockScroll() {
+    document.documentElement.style.setProperty('--scrollbar-width', getScrollbarWidth() + 'px');
+    document.body.classList.add('modal-open-noscroll');
+    document.addEventListener('wheel',     preventScroll, { passive: false });
+    document.addEventListener('touchmove', preventScroll, { passive: false });
+}
+function unlockScroll() {
+    document.body.classList.remove('modal-open-noscroll');
+    document.documentElement.style.removeProperty('--scrollbar-width');
+    document.removeEventListener('wheel',     preventScroll);
+    document.removeEventListener('touchmove', preventScroll);
+}
 
-(function ($) {
+// ── Focus trap helpers ───────────────────────────────────────────
+var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+var _trapHandler = null;
 
-    // Focusable elements we allow Tab to cycle through
-    var FOCUSABLE = [
-        'a[href]',
-        'button:not([disabled])',
-        'input:not([disabled]):not([type="hidden"])',
-        'select:not([disabled])',
-        'textarea:not([disabled])',
-        '[tabindex]:not([tabindex="-1"])',
-    ].join(', ');
+function trapFocus(modalEl) {
+    var els = Array.from(modalEl.querySelectorAll(FOCUSABLE))
+                   .filter(function(el){ return el.offsetParent !== null; });
+    if (!els.length) return;
+    var first = els[0], last = els[els.length - 1];
+    setTimeout(function(){ first.focus(); }, 60);
+    if (_trapHandler) document.removeEventListener('keydown', _trapHandler);
+    _trapHandler = function(e) {
+        if (e.key !== 'Tab') return;
+        if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+        else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
+    };
+    document.addEventListener('keydown', _trapHandler);
+}
+function releaseTrap() {
+    if (_trapHandler) { document.removeEventListener('keydown', _trapHandler); _trapHandler = null; }
+}
 
-    var trapHandler = null; // holds the active keydown listener so we can remove it
-
-    // Measure scrollbar width once (prevents layout jump on body overflow:hidden)
-    function getScrollbarWidth() {
-        var div = document.createElement('div');
-        div.style.cssText = 'width:100px;height:100px;overflow:scroll;position:absolute;top:-9999px';
-        document.body.appendChild(div);
-        var w = div.offsetWidth - div.clientWidth;
-        document.body.removeChild(div);
-        return w;
-    }
-
-    function lockScroll() {
-        var sw = getScrollbarWidth();
-        document.documentElement.style.setProperty('--scrollbar-width', sw + 'px');
-        document.body.classList.add('modal-open-noscroll');
-        // Belt-and-suspenders: block wheel events on the document itself
-        // so no scrollable container underneath the overlay can respond
-        document.addEventListener('wheel', preventScroll, { passive: false });
-        document.addEventListener('touchmove', preventScroll, { passive: false });
-    }
-
-    function unlockScroll() {
-        document.body.classList.remove('modal-open-noscroll');
-        document.documentElement.style.removeProperty('--scrollbar-width');
-        document.removeEventListener('wheel', preventScroll);
-        document.removeEventListener('touchmove', preventScroll);
-    }
-
-    // Allows scrolling INSIDE the modal content, blocks everything else
-    function preventScroll(e) {
-        var mfpContent = document.querySelector('.mfp-content');
-        // If the scroll target is inside the modal content, allow it
-        if (mfpContent && mfpContent.contains(e.target)) return;
-        e.preventDefault();
-    }
-
-    function trapFocus(modalEl) {
-        var focusable = Array.from(modalEl.querySelectorAll(FOCUSABLE))
-                             .filter(function (el) { return el.offsetParent !== null; }); // only visible
-
-        if (!focusable.length) return;
-
-        var first = focusable[0];
-        var last  = focusable[focusable.length - 1];
-
-        // Move focus into the modal immediately
-        // Small delay lets Magnific finish its DOM placement
-        setTimeout(function () { first.focus(); }, 50);
-
-        // Remove any previous trap
-        if (trapHandler) document.removeEventListener('keydown', trapHandler);
-
-        trapHandler = function (e) {
-            if (e.key !== 'Tab') return;
-
-            if (e.shiftKey) {
-                // Shift+Tab: if focus is on first element, wrap to last
-                if (document.activeElement === first) {
-                    e.preventDefault();
-                    last.focus();
-                }
-            } else {
-                // Tab: if focus is on last element, wrap to first
-                if (document.activeElement === last) {
-                    e.preventDefault();
-                    first.focus();
-                }
-            }
-        };
-
-        document.addEventListener('keydown', trapHandler);
-    }
-
-    function releaseTrap() {
-        if (trapHandler) {
-            document.removeEventListener('keydown', trapHandler);
-            trapHandler = null;
-        }
-    }
-
-    // ── Hook into Magnific Popup callbacks ──────────────────────
-    $(document).on('click', '.modal-with-form, .modal-with-zoom-anim', function () {
-        // Magnific opens on the next tick — wait for it
-        setTimeout(function () {
-            var wrap = document.querySelector('.mfp-wrap');
-            var content = wrap ? wrap.querySelector('.mfp-content') : null;
-            var modal = content ? content.querySelector('.modal-block, .zoom-anim-dialog') : null;
-            if (modal) {
+// ── Central modal opener — all modals use this ───────────────────
+function openMfpModal(src) {
+    $.magnificPopup.open({
+        items: { src: src },
+        type: 'inline',
+        callbacks: {
+            open: function() {
                 lockScroll();
-                trapFocus(modal);
+                trapFocus(this.content[0]);
+            },
+            close: function() {
+                releaseTrap();
+                unlockScroll();
             }
-        }, 80);
-    });
-
-    // Re-trap when update modal is opened via JS (getVoucherDetails)
-    // because it doesn't go through the click handler above
-    $(document).on('mfpOpen', function () {
-        var wrap = document.querySelector('.mfp-wrap');
-        var content = wrap ? wrap.querySelector('.mfp-content') : null;
-        var modal = content ? content.querySelector('.modal-block, .zoom-anim-dialog') : null;
-        if (modal) {
-            lockScroll();
-            trapFocus(modal);
         }
     });
-
-    // Release on close
-    $(document).on('click', '.modal-dismiss, .mfp-close', function () {
-        releaseTrap();
-        unlockScroll();
-    });
-
-    // Also release if clicking the dark overlay
-    $(document).on('mfpClose', function () {
-        releaseTrap();
-        unlockScroll();
-    });
-
-    // Escape key — Magnific handles closing, we handle cleanup
-    $(document).on('keydown', function (e) {
-        if (e.key === 'Escape' && document.body.classList.contains('modal-open-noscroll')) {
-            releaseTrap();
-            unlockScroll();
-        }
-    });
-
-}(jQuery));
-
-// ── Voucher detail loader ───────────────────────────────────────
-function getVoucherDetails(id) {
-    document.getElementById('updateForm').action = `/vouchers/{{ $type }}/${id}`;
-    fetch(`/vouchers/{{ $type }}/${id}`)
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-            document.getElementById('update_id').value        = id;
-            document.getElementById('update_id_hidden').value = id;
-            document.getElementById('update_date').value      = data.date;
-            $('#update_ac_dr_sid').val(data.ac_dr_sid).trigger('change');
-            $('#update_ac_cr_sid').val(data.ac_cr_sid).trigger('change');
-            document.getElementById('update_amount').value  = data.amount;
-            document.getElementById('update_remarks').value = data.remarks;
-        });
 }
 
-function setDeleteId(id) {
-    document.getElementById('deleteForm').action = `/vouchers/{{ $type }}/${id}`;
+// ── EDIT MODAL ───────────────────────────────────────────────────
+// FIX: set form action BEFORE opening modal, fetch data first,
+// then open so Select2 values are populated when modal appears.
+function openEditModal(id) {
+    document.getElementById('editForm').action        = '/vouchers/{{ $type }}/' + id;
+    document.getElementById('edit_voucher_label').textContent = '#' + id;
+
+    fetch('/vouchers/{{ $type }}/' + id, {
+        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        document.getElementById('edit_date').value    = data.date;
+        document.getElementById('edit_amount').value  = data.amount;
+        document.getElementById('edit_remarks').value = data.remarks || '';
+        // Trigger Select2 update after modal is in DOM
+        $('#edit_ac_dr_sid').val(data.ac_dr_sid).trigger('change');
+        $('#edit_ac_cr_sid').val(data.ac_cr_sid).trigger('change');
+        openMfpModal('#editModal');
+    })
+    .catch(function() {
+        alert('Could not load voucher data. Please try again.');
+    });
 }
 
-$(document).ready(function () {
+// ── DELETE MODAL ─────────────────────────────────────────────────
+// FIX: set form action and open programmatically — previously the
+// anchor used href="#deleteModal" without modal-with-form class,
+// so Magnific never initialised it as a popup.
+function openDeleteModal(id) {
+    document.getElementById('deleteForm').action              = '/vouchers/{{ $type }}/' + id;
+    document.getElementById('delete_voucher_label').textContent = 'Voucher #' + id;
+    openMfpModal('#deleteModal');
+}
+
+// ── Escape key cleanup ───────────────────────────────────────────
+$(document).on('keydown', function(e) {
+    if (e.key === 'Escape' && document.body.classList.contains('modal-open-noscroll')) {
+        releaseTrap();
+        unlockScroll();
+    }
+});
+
+// ── Add modal — still uses theme class-based open ────────────────
+$(document).on('click', '.modal-with-form', function() {
+    setTimeout(function() {
+        var modal = document.querySelector('.mfp-content .modal-block');
+        if (modal) { lockScroll(); trapFocus(modal); }
+    }, 80);
+});
+$(document).on('click', '.modal-dismiss, .mfp-close', function() {
+    releaseTrap();
+    unlockScroll();
+});
+
+// ── DataTable + Select2 ──────────────────────────────────────────
+$(document).ready(function() {
     $('.select2-js').select2({ width: '100%' });
     $('#voucher-datatable').DataTable({
         pageLength: 50,
