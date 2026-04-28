@@ -3,18 +3,26 @@
 @section('title', 'Users | All Users')
 
 @section('content')
+
+@if (session('success'))
+    <div class="alert alert-success alert-dismissible">
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        {{ session('success') }}
+    </div>
+@elseif (session('error'))
+    <div class="alert alert-danger alert-dismissible">
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        {{ session('error') }}
+    </div>
+@endif
+
 <div class="row">
   <div class="col">
-            @if (session('success'))
-          <div class="alert alert-success">{{ session('success') }}</div>
-        @elseif (session('error'))
-          <div class="alert alert-danger">{{ session('error') }}</div>
-        @endif
     <section class="card">
-      
       <header class="card-header d-flex justify-content-between">
         <h2 class="card-title">Users</h2>
         <div>
+          {{-- Add user still uses theme class — no form action conflict here --}}
           <a href="#addModal" class="modal-with-form btn btn-primary">
             <i class="fas fa-plus"></i> Add User
           </a>
@@ -22,16 +30,15 @@
       </header>
 
       <div class="card-body">
-
-
         <div class="modal-wrapper table-scroll">
-          <table class="table table-bordered table-striped mb-0" id="cust-datatable-default">
+          <table class="table table-bordered table-striped mb-0" id="users-datatable">
             <thead>
               <tr>
                 <th>#</th>
                 <th>Name</th>
-                <th>Email</th>
+                <th>Username</th>
                 <th>Role(s)</th>
+                <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -40,28 +47,49 @@
                 <tr>
                   <td>{{ $index + 1 }}</td>
                   <td>{{ $user->name }}</td>
-                  <td>{{ $user->email ?? 'N/A'}}</td>
+                  <td>{{ $user->username ?? 'N/A' }}</td>
                   <td>{{ $user->roles->pluck('name')->join(', ') }}</td>
-               
+                  <td>
+                    <span class="badge {{ $user->is_active ? 'bg-success' : 'bg-secondary' }}">
+                        {{ $user->is_active ? 'Active' : 'Inactive' }}
+                    </span>
+                  </td>
                   <td class="actions">
-                    <a href="#updateModal" class="text-primary modal-with-form" onclick="getUser({{ $user->id }})">
+                    {{-- Edit --}}
+                    <a href="javascript:void(0)"
+                       class="text-primary me-1"
+                       onclick="openEditModal({{ $user->id }})"
+                       title="Edit User">
                       <i class="fa fa-edit"></i>
                     </a>
 
-                    <!-- Activate / Deactivate -->
-                    <a href="#activateModal" class="text-{{ $user->is_active ? 'danger' : 'success' }} modal-with-form"
-                      onclick="setActivateUser({{ $user->id }}, {{ $user->is_active ? 'false' : 'true' }})" 
-                      title="{{ $user->is_active ? 'Deactivate User' : 'Activate User' }}">
+                    {{-- Activate / Deactivate --}}
+                    <a href="javascript:void(0)"
+                       class="text-{{ $user->is_active ? 'danger' : 'success' }} me-1"
+                       onclick="openActivateModal({{ $user->id }}, {{ $user->is_active ? 'false' : 'true' }})"
+                       title="{{ $user->is_active ? 'Deactivate' : 'Activate' }} User">
                       <i class="fa fa-toggle-{{ $user->is_active ? 'on' : 'off' }}"></i>
                     </a>
 
-                    <a href="#passwordModal" class="text-success modal-with-form" onclick="getPasswordUser({{ $user->id }})" title="Change Password">
+                    {{-- Change Password --}}
+                    {{-- FIX: use javascript:void(0) + openPasswordModal()
+                         The original used href="#passwordModal" with modal-with-form
+                         which made the theme intercept the form submit and post to
+                         "#passwordModal" instead of the actual /users/{id}/change-password URL --}}
+                    <a href="javascript:void(0)"
+                       class="text-warning me-1"
+                       onclick="openPasswordModal({{ $user->id }})"
+                       title="Change Password">
                       <i class="fa fa-key"></i>
                     </a>
-                    <form action="{{ route('users.destroy', $user->id) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure?')">
+
+                    {{-- Delete --}}
+                    <form action="{{ route('users.destroy', $user->id) }}"
+                          method="POST" class="d-inline"
+                          onsubmit="return confirm('Delete {{ addslashes($user->name) }}? This cannot be undone.')">
                       @csrf
                       @method('DELETE')
-                      <button type="submit" class="btn btn-link p-0 m-0 text-danger">
+                      <button type="submit" class="btn btn-link p-0 m-0 text-danger" title="Delete">
                         <i class="fas fa-trash-alt"></i>
                       </button>
                     </form>
@@ -74,33 +102,37 @@
       </div>
     </section>
 
-    <!-- Add User Modal -->
+    {{-- ── ADD USER MODAL ────────────────────────────────────── --}}
     <div id="addModal" class="modal-block modal-block-primary mfp-hide">
       <section class="card">
-        <form action="{{ route('users.store') }}" method="POST" enctype="multipart/form-data">
+        <form action="{{ route('users.store') }}" method="POST"
+              enctype="multipart/form-data" onkeydown="return event.key != 'Enter';">
           @csrf
           <header class="card-header">
             <h2 class="card-title">Add User</h2>
           </header>
           <div class="card-body">
             <div class="mb-2">
-              <label>Name</label>
+              <label>Name <span class="text-danger">*</span></label>
               <input type="text" name="name" class="form-control" required />
             </div>
             <div class="mb-2">
-              <label>Username</label>
-              <input type="text" name="username" class="form-control" required />
+              <label>Username <span class="text-danger">*</span></label>
+              <input type="text" name="username" class="form-control"
+                     autocomplete="off" required />
             </div>
             <div class="mb-2">
-              <label>Password</label>
-              <input type="password" name="password" class="form-control" required />
+              <label>Password <span class="text-danger">*</span></label>
+              <input type="password" name="password" class="form-control"
+                     autocomplete="new-password" required />
             </div>
             <div class="mb-2">
-              <label>Confirm Password</label>
-              <input type="password" name="password_confirmation" class="form-control" required />
+              <label>Confirm Password <span class="text-danger">*</span></label>
+              <input type="password" name="password_confirmation"
+                     class="form-control" autocomplete="new-password" required />
             </div>
             <div class="mb-2">
-              <label>Role</label>
+              <label>Role <span class="text-danger">*</span></label>
               <select name="role" class="form-control" required>
                 <option value="">-- Select Role --</option>
                 @foreach($roles as $role)
@@ -110,35 +142,35 @@
             </div>
           </div>
           <footer class="card-footer text-end">
-            <button type="submit" class="btn btn-primary">Create</button>
-            <button class="btn btn-default modal-dismiss">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create User</button>
+            <button type="button" class="btn btn-default modal-dismiss">Cancel</button>
           </footer>
         </form>
       </section>
     </div>
 
-    <!-- Edit User Modal -->
-    <div id="updateModal" class="modal-block modal-block-primary mfp-hide">
+    {{-- ── EDIT USER MODAL ───────────────────────────────────── --}}
+    {{-- FIX: action set by openEditModal() before modal opens --}}
+    <div id="editModal" class="modal-block modal-block-primary mfp-hide">
       <section class="card">
-        <form id="updateForm" method="POST" enctype="multipart/form-data">
+        <form id="editUserForm" method="POST"
+              enctype="multipart/form-data" onkeydown="return event.key != 'Enter';">
           @csrf
           @method('PUT')
           <header class="card-header">
-            <h2 class="card-title">Edit User</h2>
+            <h2 class="card-title">Edit User <small class="text-muted" id="edit_user_label"></small></h2>
           </header>
           <div class="card-body">
-            <input type="hidden" name="id" id="edit_user_id">
-
             <div class="mb-2">
-              <label>Name</label>
+              <label>Name <span class="text-danger">*</span></label>
               <input type="text" name="name" id="edit_name" class="form-control" required>
             </div>
             <div class="mb-2">
-              <label>Username</label>
+              <label>Username <span class="text-danger">*</span></label>
               <input type="text" name="username" id="edit_username" class="form-control" required>
             </div>
             <div class="mb-2">
-              <label>Role</label>
+              <label>Role <span class="text-danger">*</span></label>
               <select name="role" id="edit_role" class="form-control" required>
                 <option value="">-- Select Role --</option>
                 @foreach($roles as $role)
@@ -148,58 +180,65 @@
             </div>
           </div>
           <footer class="card-footer text-end">
-            <button type="submit" class="btn btn-primary">Update</button>
-            <button class="btn btn-default modal-dismiss">Cancel</button>
+            <button type="submit" class="btn btn-primary">Update User</button>
+            <button type="button" class="btn btn-default modal-dismiss">Cancel</button>
           </footer>
         </form>
       </section>
     </div>
 
-    <!-- Change Password Modal -->
+    {{-- ── CHANGE PASSWORD MODAL ─────────────────────────────── --}}
+    {{-- FIX: action set by openPasswordModal() before modal opens.
+         Original used modal-with-form which made the theme post to
+         "#passwordModal" instead of /users/{id}/change-password --}}
     <div id="passwordModal" class="modal-block modal-block-warning mfp-hide">
       <section class="card">
-        <form id="passwordForm" method="POST" enctype="multipart/form-data">
+        <form id="passwordForm" method="POST"
+              enctype="multipart/form-data" onkeydown="return event.key != 'Enter';">
           @csrf
           @method('PUT')
           <header class="card-header">
-            <h2 class="card-title">Change Password</h2>
+            <h2 class="card-title">Change Password <small class="text-muted" id="pw_user_label"></small></h2>
           </header>
           <div class="card-body">
-            <input type="hidden" name="id" id="password_user_id" />
-
-            <div class="mb-2">
-              <label>New Password</label>
-              <input type="password" name="password" id="new_password" class="form-control" required minlength="6" />
+            <div id="pw-alert" class="alert d-none mb-2"></div>
+            <div class="mb-3">
+              <label>New Password <span class="text-danger">*</span></label>
+              <input type="password" name="password" id="pw_new"
+                     class="form-control" required minlength="6"
+                     autocomplete="new-password" placeholder="Min 6 characters" />
             </div>
             <div class="mb-2">
-              <label>Confirm Password</label>
-              <input type="password" name="password_confirmation" id="confirm_password" class="form-control" required minlength="6" />
+              <label>Confirm Password <span class="text-danger">*</span></label>
+              {{-- FIX: field name must be password_confirmation for 'confirmed' rule --}}
+              <input type="password" name="password_confirmation" id="pw_confirm"
+                     class="form-control" required minlength="6"
+                     autocomplete="new-password" placeholder="Repeat new password" />
             </div>
           </div>
           <footer class="card-footer text-end">
             <button type="submit" class="btn btn-warning">Change Password</button>
-            <button class="btn btn-default modal-dismiss">Cancel</button>
+            <button type="button" class="btn btn-default modal-dismiss">Cancel</button>
           </footer>
         </form>
       </section>
     </div>
 
-    <!-- Activate/Deactivate Modal -->
+    {{-- ── ACTIVATE / DEACTIVATE MODAL ──────────────────────── --}}
     <div id="activateModal" class="modal-block modal-block-primary mfp-hide">
       <section class="card">
-        <form id="activateForm" method="POST">
+        <form id="activateForm" method="POST" onkeydown="return event.key != 'Enter';">
           @csrf
           @method('PUT')
           <header class="card-header">
-            <h2 class="card-title" id="activateModalTitle">Activate/Deactivate User</h2>
+            <h2 class="card-title" id="activate_title">Activate / Deactivate User</h2>
           </header>
           <div class="card-body">
-            <input type="hidden" name="id" id="activate_user_id" />
-            <p id="activateModalMessage">Are you sure you want to change the status of this user?</p>
+            <p id="activate_message">Are you sure you want to change the status of this user?</p>
           </div>
           <footer class="card-footer text-end">
-            <button type="submit" class="btn btn-primary" id="activateModalButton">Yes, proceed</button>
-            <button class="btn btn-default modal-dismiss">Cancel</button>
+            <button type="submit" class="btn btn-primary" id="activate_btn">Yes, proceed</button>
+            <button type="button" class="btn btn-default modal-dismiss">Cancel</button>
           </footer>
         </form>
       </section>
@@ -208,58 +247,157 @@
   </div>
 </div>
 
+<style>
+body.modal-open-noscroll {
+    overflow: hidden !important;
+    padding-right: var(--scrollbar-width, 0px);
+}
+body.modal-open-noscroll section.body,
+body.modal-open-noscroll .inner-wrapper,
+body.modal-open-noscroll .content-body,
+body.modal-open-noscroll main {
+    overflow: hidden !important;
+}
+.mfp-wrap { z-index: 10000 !important; }
+.mfp-bg   { z-index: 9999  !important; }
+</style>
+
 <script>
-  function getUser(id) {
-    fetch(`/users/${id}`)
-      .then(response => response.json())
-      .then(res => {
-        if (res.status) {
-          const user = res.data;
-          document.getElementById('updateForm').action = `/users/${user.id}`;
-          document.getElementById('edit_user_id').value = user.id;
-          document.getElementById('edit_name').value = user.name;
-          document.getElementById('edit_username').value = user.username;
-          document.getElementById('edit_role').value = user.roles[0]?.id || '';
+// ── Scroll lock ──────────────────────────────────────────────────
+function getScrollbarWidth() {
+    var d = document.createElement('div');
+    d.style.cssText = 'width:100px;height:100px;overflow:scroll;position:absolute;top:-9999px';
+    document.body.appendChild(d);
+    var w = d.offsetWidth - d.clientWidth;
+    document.body.removeChild(d);
+    return w;
+}
+function preventScroll(e) {
+    var mc = document.querySelector('.mfp-content');
+    if (mc && mc.contains(e.target)) return;
+    e.preventDefault();
+}
+function lockScroll() {
+    document.documentElement.style.setProperty('--scrollbar-width', getScrollbarWidth() + 'px');
+    document.body.classList.add('modal-open-noscroll');
+    document.addEventListener('wheel',     preventScroll, { passive: false });
+    document.addEventListener('touchmove', preventScroll, { passive: false });
+}
+function unlockScroll() {
+    document.body.classList.remove('modal-open-noscroll');
+    document.documentElement.style.removeProperty('--scrollbar-width');
+    document.removeEventListener('wheel',     preventScroll);
+    document.removeEventListener('touchmove', preventScroll);
+}
 
-        } else {
-          alert('User not found.');
+// ── Focus trap ───────────────────────────────────────────────────
+var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled])';
+var _trap = null;
+function trapFocus(el) {
+    var els = Array.from(el.querySelectorAll(FOCUSABLE)).filter(function(e){ return e.offsetParent !== null; });
+    if (!els.length) return;
+    var first = els[0], last = els[els.length - 1];
+    setTimeout(function(){ first.focus(); }, 60);
+    if (_trap) document.removeEventListener('keydown', _trap);
+    _trap = function(e) {
+        if (e.key !== 'Tab') return;
+        if (e.shiftKey) { if (document.activeElement === first) { e.preventDefault(); last.focus(); } }
+        else            { if (document.activeElement === last)  { e.preventDefault(); first.focus(); } }
+    };
+    document.addEventListener('keydown', _trap);
+}
+function releaseTrap() {
+    if (_trap) { document.removeEventListener('keydown', _trap); _trap = null; }
+}
+
+// ── Central modal open ───────────────────────────────────────────
+function openMfpModal(src) {
+    $.magnificPopup.open({
+        items: { src: src },
+        type: 'inline',
+        callbacks: {
+            open:  function() { lockScroll(); trapFocus(this.content[0]); },
+            close: function() { releaseTrap(); unlockScroll(); }
         }
-      })
-      .catch(err => {
-        console.error('Failed to load user:', err);
-        alert('Error loading user details.');
-      });
-  }
+    });
+}
 
-  function getPasswordUser(id) {
-    document.getElementById('password_user_id').value = id;
-    document.getElementById('passwordForm').action = `/users/${id}/change-password`;
-  }
+$(document).on('click', '.modal-dismiss, .mfp-close', function() { releaseTrap(); unlockScroll(); });
+$(document).on('keydown', function(e) {
+    if (e.key === 'Escape' && document.body.classList.contains('modal-open-noscroll')) {
+        releaseTrap(); unlockScroll();
+    }
+});
+// Add modal uses theme class — hook scroll lock onto it
+$(document).on('click', '.modal-with-form', function() {
+    setTimeout(function() {
+        var m = document.querySelector('.mfp-content .modal-block');
+        if (m) { lockScroll(); trapFocus(m); }
+    }, 80);
+});
 
-  function setActivateUser(userId, activate) {
-    document.getElementById('activate_user_id').value = userId;
+// ── EDIT USER ────────────────────────────────────────────────────
+function openEditModal(id) {
+    fetch('/users/' + id, {
+        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(res) {
+        if (!res.status) { alert('User not found.'); return; }
+        var u = res.data;
+        document.getElementById('editUserForm').action       = '/users/' + u.id;
+        document.getElementById('edit_user_label').textContent = '— ' + u.name;
+        document.getElementById('edit_name').value           = u.name;
+        document.getElementById('edit_username').value       = u.username;
+        document.getElementById('edit_role').value           = u.roles[0]?.id || '';
+        openMfpModal('#editModal');
+    })
+    .catch(function() { alert('Error loading user details.'); });
+}
 
-    const form = document.getElementById('activateForm');
-    form.action = `/users/${userId}/toggle-active`;
+// ── CHANGE PASSWORD ──────────────────────────────────────────────
+// FIX: sets form action to the real route BEFORE opening modal.
+// The old code used modal-with-form on the trigger link which caused
+// the Porto theme to intercept the form submit and POST to
+// "#passwordModal" (the href value) instead of the actual route.
+function openPasswordModal(id) {
+    document.getElementById('passwordForm').action    = '/users/' + id + '/change-password';
+    document.getElementById('pw_user_label').textContent = '— User #' + id;
+    document.getElementById('pw_new').value           = '';
+    document.getElementById('pw_confirm').value       = '';
+    document.getElementById('pw-alert').className     = 'alert d-none';
+    openMfpModal('#passwordModal');
+}
 
-    const modalTitle = document.getElementById('activateModalTitle');
-    const modalMessage = document.getElementById('activateModalMessage');
-    const modalButton = document.getElementById('activateModalButton');
+// ── ACTIVATE / DEACTIVATE ────────────────────────────────────────
+function openActivateModal(userId, activate) {
+    document.getElementById('activateForm').action = '/users/' + userId + '/toggle-active';
+
+    var title   = document.getElementById('activate_title');
+    var message = document.getElementById('activate_message');
+    var btn     = document.getElementById('activate_btn');
 
     if (activate) {
-      modalTitle.textContent = 'Activate User';
-      modalMessage.textContent = 'Are you sure you want to activate this user?';
-      modalButton.textContent = 'Activate';
-      modalButton.classList.remove('btn-danger');
-      modalButton.classList.add('btn-success');
+        title.textContent   = 'Activate User';
+        message.textContent = 'Are you sure you want to activate this user?';
+        btn.textContent     = 'Activate';
+        btn.className       = 'btn btn-success';
     } else {
-      modalTitle.textContent = 'Deactivate User';
-      modalMessage.textContent = 'Are you sure you want to deactivate this user?';
-      modalButton.textContent = 'Deactivate';
-      modalButton.classList.remove('btn-success');
-      modalButton.classList.add('btn-danger');
+        title.textContent   = 'Deactivate User';
+        message.textContent = 'Are you sure you want to deactivate this user?';
+        btn.textContent     = 'Deactivate';
+        btn.className       = 'btn btn-danger';
     }
-  }
 
+    openMfpModal('#activateModal');
+}
+
+// ── DataTable ────────────────────────────────────────────────────
+$(document).ready(function() {
+    $('#users-datatable').DataTable({
+        pageLength: 25,
+        order: [[0, 'asc']],
+    });
+});
 </script>
 @endsection
