@@ -117,18 +117,31 @@ class UserController extends Controller
             'password' => 'required|string|min:6|confirmed',
         ]);
 
-        $user = User::findOrFail($id);
+        $user        = User::findOrFail($id);
+        $currentUser = auth()->user();
 
-        // Prevent changing password of super admin if needed
-        if ($user->id == 1 || $user->hasRole('super-admin')) {
-            return redirect()->back()->with('error', 'Cannot change password of the super admin user.');
+        // Block if target is superadmin BUT current user is NOT superadmin
+        // (superadmin can change their own password or any other user's password)
+        if (
+            ($user->id == 1 || $user->hasRole('superadmin')) &&
+            !$currentUser->hasRole('superadmin')
+        ) {
+            return redirect()->back()
+                ->with('error', 'Only a superadmin can change the superadmin password.');
         }
 
         $user->password = Hash::make($request->password);
         $user->save();
 
-        return redirect()->route('users.index')->with('success', 'Password changed successfully.');
+        Log::info('[User] Password changed by admin', [
+            'target_user_id'  => $user->id,
+            'changed_by'      => $currentUser->id,
+        ]);
+
+        return redirect()->route('users.index')
+            ->with('success', 'Password changed successfully.');
     }
+
 
     public function changeMyPassword(Request $request)
     {

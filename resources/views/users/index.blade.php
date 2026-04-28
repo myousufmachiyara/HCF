@@ -123,13 +123,23 @@
             </div>
             <div class="mb-2">
               <label>Password <span class="text-danger">*</span></label>
-              <input type="password" name="password" class="form-control"
-                     autocomplete="new-password" required />
+              <div class="pw-wrap">
+                <input type="password" name="password" id="add_password" class="form-control"
+                       autocomplete="new-password" required />
+                <button type="button" class="pw-toggle" tabindex="-1" onclick="togglePw('add_password', this)">
+                    <i class="fas fa-eye"></i>
+                </button>
+              </div>
             </div>
             <div class="mb-2">
               <label>Confirm Password <span class="text-danger">*</span></label>
-              <input type="password" name="password_confirmation"
-                     class="form-control" autocomplete="new-password" required />
+              <div class="pw-wrap">
+                <input type="password" name="password_confirmation" id="add_password_confirm"
+                       class="form-control" autocomplete="new-password" required />
+                <button type="button" class="pw-toggle" tabindex="-1" onclick="togglePw('add_password_confirm', this)">
+                    <i class="fas fa-eye"></i>
+                </button>
+              </div>
             </div>
             <div class="mb-2">
               <label>Role <span class="text-danger">*</span></label>
@@ -204,16 +214,26 @@
             <div id="pw-alert" class="alert d-none mb-2"></div>
             <div class="mb-3">
               <label>New Password <span class="text-danger">*</span></label>
-              <input type="password" name="password" id="pw_new"
-                     class="form-control" required minlength="6"
-                     autocomplete="new-password" placeholder="Min 6 characters" />
+              <div class="pw-wrap">
+                <input type="password" name="password" id="pw_new"
+                       class="form-control" required minlength="6"
+                       autocomplete="new-password" placeholder="Min 6 characters" />
+                <button type="button" class="pw-toggle" tabindex="-1" onclick="togglePw('pw_new', this)">
+                    <i class="fas fa-eye"></i>
+                </button>
+              </div>
             </div>
             <div class="mb-2">
               <label>Confirm Password <span class="text-danger">*</span></label>
               {{-- FIX: field name must be password_confirmation for 'confirmed' rule --}}
-              <input type="password" name="password_confirmation" id="pw_confirm"
-                     class="form-control" required minlength="6"
-                     autocomplete="new-password" placeholder="Repeat new password" />
+              <div class="pw-wrap">
+                <input type="password" name="password_confirmation" id="pw_confirm"
+                       class="form-control" required minlength="6"
+                       autocomplete="new-password" placeholder="Repeat new password" />
+                <button type="button" class="pw-toggle" tabindex="-1" onclick="togglePw('pw_confirm', this)">
+                    <i class="fas fa-eye"></i>
+                </button>
+              </div>
             </div>
           </div>
           <footer class="card-footer text-end">
@@ -260,9 +280,36 @@ body.modal-open-noscroll main {
 }
 .mfp-wrap { z-index: 10000 !important; }
 .mfp-bg   { z-index: 9999  !important; }
+
+/* Password eye toggle */
+.pw-wrap { position: relative; }
+.pw-wrap .form-control { padding-right: 2.5rem; }
+.pw-toggle {
+    position: absolute;
+    top: 50%; right: 10px;
+    transform: translateY(-50%);
+    background: none; border: none;
+    padding: 0; cursor: pointer;
+    color: #999; font-size: 14px;
+    line-height: 1; z-index: 5;
+}
+.pw-toggle:hover { color: #444; }
 </style>
 
 <script>
+// ── Password show/hide toggle ────────────────────────────────────
+function togglePw(fieldId, btn) {
+    var input = document.getElementById(fieldId);
+    var icon  = btn.querySelector('i');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.classList.replace('fa-eye', 'fa-eye-slash');
+    } else {
+        input.type = 'password';
+        icon.classList.replace('fa-eye-slash', 'fa-eye');
+    }
+}
+
 // ── Scroll lock ──────────────────────────────────────────────────
 function getScrollbarWidth() {
     var d = document.createElement('div');
@@ -361,11 +408,18 @@ function openEditModal(id) {
 // the Porto theme to intercept the form submit and POST to
 // "#passwordModal" (the href value) instead of the actual route.
 function openPasswordModal(id) {
-    document.getElementById('passwordForm').action    = '/users/' + id + '/change-password';
+    document.getElementById('passwordForm').action       = '/users/' + id + '/change-password';
     document.getElementById('pw_user_label').textContent = '— User #' + id;
-    document.getElementById('pw_new').value           = '';
-    document.getElementById('pw_confirm').value       = '';
-    document.getElementById('pw-alert').className     = 'alert d-none';
+    // Clear fields and reset eye icons
+    ['pw_new', 'pw_confirm'].forEach(function(fid) {
+        var el = document.getElementById(fid);
+        el.value = '';
+        el.type  = 'password';
+    });
+    document.querySelectorAll('#passwordModal .pw-toggle i').forEach(function(icon) {
+        icon.className = 'fas fa-eye';
+    });
+    document.getElementById('pw-alert').className = 'alert d-none';
     openMfpModal('#passwordModal');
 }
 
