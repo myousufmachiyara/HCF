@@ -18,11 +18,11 @@
                 </h2>
                 <div>
                     @if(request('view_deleted'))
-                        <a href="{{ route('purchase_invoices.index') }}" class="btn btn-default mr-2">
+                        <a href="{{ route('purchase_invoices.index') }}" class="btn btn-default me-2">
                             <i class="fas fa-list"></i> View Active
                         </a>
                     @else
-                        <a href="{{ route('purchase_invoices.index', ['view_deleted' => 1]) }}" class="btn btn-danger mr-2">
+                        <a href="{{ route('purchase_invoices.index', ['view_deleted' => 1]) }}" class="btn btn-danger me-2">
                             <i class="fas fa-trash-restore"></i> View Deleted
                         </a>
                     @endif
@@ -50,45 +50,51 @@
                             <tr>
                                 <td>{{ $index + 1 }}</td>
                                 <td>{{ \Carbon\Carbon::parse($invoice->invoice_date)->format('d-M-Y') }}</td>
-                                <td class="text-primary">PUR-{{ $invoice->invoice_no ?? 'N/A' }}</td>
+
+                                {{-- FIX: invoice number is now a clickable PDF link.
+                                     Deleted invoices show as plain text since print
+                                     route requires a non-trashed record. --}}
+                                <td>
+                                    @if($invoice->trashed())
+                                        <span class="text-muted">PUR-{{ $invoice->invoice_no ?? 'N/A' }}</span>
+                                    @else
+                                        <a href="{{ route('purchase_invoices.print', $invoice->id) }}" target="_blank"class="fw-bold title="Open PDF">
+                                            PUR-{{ $invoice->invoice_no ?? 'N/A' }}
+                                        </a>
+                                    @endif
+                                </td>
+
                                 <td>{{ $invoice->vendor->name ?? 'N/A' }}</td>
                                 <td>
                                     @if($invoice->attachments && count($invoice->attachments))
                                         @foreach ($invoice->attachments as $file)
-                                            <a href="{{ asset('storage/' . $file->file_path) }}" target="_blank" class="mr-2">
+                                            <a href="{{ asset('storage/' . $file->file_path) }}"
+                                               target="_blank" class="me-1">
                                                 <i class="fas fa-file"></i>
                                             </a>
                                         @endforeach
                                     @else
-                                        <span class="text-muted">No files</span>
+                                        <span class="text-muted">—</span>
                                     @endif
                                 </td>
                                 <td>
-                                    @if($invoice->trashed())
-                                        {{-- Restore Logic --}}
-                                        <form action="{{ route('purchase_invoices.restore', $invoice->id) }}" method="POST" style="display:inline;">
-                                            @csrf
-                                            @method('PATCH')
-                                            <button type="submit" class="btn btn-link p-0 text-success" title="Restore">
-                                                <i class="fas fa-undo"></i> Restore
-                                            </button>
-                                        </form>
-                                    @else
-                                        {{-- Normal Actions --}}
-                                        <a href="{{ route('purchase_invoices.edit', $invoice->id) }}" class="text-primary mr-2" title="Edit">
-                                            <i class="fas fa-edit"></i>
-                                        </a>
-                                        <a href="{{ route('purchase_invoices.print', $invoice->id) }}" target="_blank" class="text-success mr-2" title="Print">
-                                            <i class="fas fa-print"></i>
-                                        </a>
-                                        <form action="{{ route('purchase_invoices.destroy', $invoice->id) }}" method="POST" style="display:inline;">
-                                            @csrf
-                                            @method('DELETE')
-                                            <button class="btn btn-link p-0 text-danger" onclick="return confirm('Move to trash?')" title="Delete">
-                                                <i class="fa fa-trash-alt"></i>
-                                            </button>
-                                        </form>
-                                    @endif
+                                    <a href="{{ route('purchase_invoices.edit', $invoice->id) }}"
+                                        class="text-primary me-1" title="Edit">
+                                        <i class="fas fa-edit"></i>
+                                    </a>
+                                    <a href="{{ route('purchase_invoices.print', $invoice->id) }}"
+                                        target="_blank" class="text-success me-1" title="Print">
+                                        <i class="fas fa-print"></i>
+                                    </a>
+                                    <form action="{{ route('purchase_invoices.destroy', $invoice->id) }}"
+                                            method="POST" style="display:inline;">
+                                        @csrf
+                                        @method('DELETE')
+                                        <button class="btn btn-link p-0 text-danger"
+                                                onclick="return confirm('Move to trash?')" title="Delete">
+                                            <i class="fa fa-trash-alt"></i>
+                                        </button>
+                                    </form>
                                 </td>
                             </tr>
                             @endforeach
