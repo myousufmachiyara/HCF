@@ -74,9 +74,9 @@ class AccountsReportController extends Controller
     // ─────────────────────────────────────────────────────────────
     // HELPER — is this account debit-natured?
     // ─────────────────────────────────────────────────────────────
-    private function isDebitNature(string $accountType): bool
+    private function isDebitNature(?string $accountType): bool
     {
-        return in_array($accountType, self::DEBIT_NATURE);
+        return in_array($accountType ?? '', self::DEBIT_NATURE);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -108,10 +108,12 @@ class AccountsReportController extends Controller
 
             $vDr = Voucher::where('ac_dr_sid', $accountId)
                 ->where('date', '<=', $asOfDate)
+                ->whereNull('deleted_at')
                 ->sum('amount');
 
             $vCr = Voucher::where('ac_cr_sid', $accountId)
                 ->where('date', '<=', $asOfDate)
+                ->whereNull('deleted_at')
                 ->sum('amount');
         } else {
             // Mode B: period only — no opening balance
@@ -120,10 +122,12 @@ class AccountsReportController extends Controller
 
             $vDr = Voucher::where('ac_dr_sid', $accountId)
                 ->whereBetween('date', [$from, $to])
+                ->whereNull('deleted_at')
                 ->sum('amount');
 
             $vCr = Voucher::where('ac_cr_sid', $accountId)
                 ->whereBetween('date', [$from, $to])
+                ->whereNull('deleted_at')
                 ->sum('amount');
         }
 
@@ -163,6 +167,7 @@ class AccountsReportController extends Controller
         ]);
 
         $vouchers = Voucher::whereBetween('date', [$from, $to])
+            ->whereNull('deleted_at')
             ->where(fn($q) => $q->where('ac_dr_sid', $accountId)->orWhere('ac_cr_sid', $accountId))
             ->orderBy('date')
             ->get();
@@ -219,6 +224,7 @@ class AccountsReportController extends Controller
         ]);
 
         $vouchers = Voucher::whereBetween('date', [$from, $to])
+            ->whereNull('deleted_at')
             ->where(fn($q) => $q->where('ac_dr_sid', $accountId)->orWhere('ac_cr_sid', $accountId))
             ->orderBy('date')
             ->get();
@@ -421,6 +427,7 @@ class AccountsReportController extends Controller
 
         $vouchers = Voucher::with(['debitAccount', 'creditAccount'])
             ->whereBetween('date', [$from, $to])
+            ->whereNull('deleted_at')
             ->where(fn($q) => $q->whereIn('ac_dr_sid', $ids)->orWhereIn('ac_cr_sid', $ids))
             ->orderBy('date')
             ->get();
@@ -467,6 +474,8 @@ class AccountsReportController extends Controller
     {
         return Voucher::with(['debitAccount', 'creditAccount'])
             ->whereBetween('date', [$from, $to])
+            ->whereNull('deleted_at')
+            ->whereNull('reference')          // exclude system entries (PI-, SI-, PR-, SR-)
             ->orderBy('date')
             ->get()
             ->map(fn($v) => [
@@ -486,8 +495,8 @@ class AccountsReportController extends Controller
     {
         $cashBankIds = ChartOfAccounts::whereIn('account_type', ['cash', 'bank'])->pluck('id');
 
-        $inflow  = Voucher::whereIn('ac_dr_sid', $cashBankIds)->whereBetween('date', [$from, $to])->sum('amount');
-        $outflow = Voucher::whereIn('ac_cr_sid', $cashBankIds)->whereBetween('date', [$from, $to])->sum('amount');
+        $inflow  = Voucher::whereIn('ac_dr_sid', $cashBankIds)->whereBetween('date', [$from, $to])->whereNull('deleted_at')->sum('amount');
+        $outflow = Voucher::whereIn('ac_cr_sid', $cashBankIds)->whereBetween('date', [$from, $to])->whereNull('deleted_at')->sum('amount');
 
         return [
             ['Total Cash Inflow (Receipts)',       $this->fmt($inflow)],
