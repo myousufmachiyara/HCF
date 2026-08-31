@@ -38,6 +38,7 @@
                 <th>Account Credit</th>
                 <th>Remarks</th>
                 <th>Amount</th>
+                <th>Attachments</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -50,6 +51,35 @@
                   <td>{{ $row->creditAccount->name ?? 'N/A' }}</td>
                   <td>{{ $row->remarks }}</td>
                   <td><strong>{{ number_format($row->amount, 0, '.', ',') }}</strong></td>
+                  <td>
+                    @php
+                        $files = is_array($row->attachments)
+                            ? $row->attachments
+                            : json_decode($row->attachments ?? '[]', true);
+                        $files = is_array($files) ? array_filter($files) : [];
+                    @endphp
+                    @if(count($files))
+                        @foreach($files as $file)
+                            @php
+                                $ext      = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+                                $isPdf    = $ext === 'pdf';
+                                $isImage  = in_array($ext, ['jpg','jpeg','png','gif','webp']);
+                                $icon     = $isPdf ? 'fa-file-pdf text-danger'
+                                          : ($isImage ? 'fa-file-image text-primary'
+                                          : 'fa-file text-secondary');
+                                $fileName = basename($file);
+                            @endphp
+                            <a href="{{ asset('storage/' . $file) }}"
+                               target="_blank"
+                               title="{{ $fileName }}"
+                               class="me-1 d-inline-block">
+                                <i class="fas {{ $icon }}"></i>
+                            </a>
+                        @endforeach
+                    @else
+                        <span class="text-muted">—</span>
+                    @endif
+                  </td>
                   <td class="actions">
                     <a class="text-success me-1"
                        href="{{ route('vouchers.print', ['type' => $type, 'id' => $row->id]) }}"
