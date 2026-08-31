@@ -69,7 +69,7 @@
                                           : 'fa-file text-secondary');
                                 $fileName = basename($file);
                             @endphp
-                            <a href="{{ asset('storage/' . $file) }}"
+                            <a href="{{ asset('uploads/' . $file) }}"
                                target="_blank"
                                title="{{ $fileName }}"
                                class="me-1 d-inline-block">

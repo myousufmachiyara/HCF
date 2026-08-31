@@ -60,16 +60,12 @@ class VoucherController extends Controller
             ]);
 
             // ── Store attachments ──────────────────────────────────
-            // FIX: store on 'public' disk under vouchers/{type}/
-            // and keep the returned relative path in an array,
-            // then JSON-encode before saving so the DB column gets
-            // a proper JSON string instead of a PHP-serialized value.
+            // Path: storage/app/public/attachments/{type}/filename
+            // Public URL: /storage/attachments/{type}/filename
             $attachments = [];
             if ($request->hasFile('att')) {
                 foreach ($request->file('att') as $file) {
-                    // Stores to storage/app/public/vouchers/{type}/filename
-                    // Returns relative path: vouchers/journal/abc123.pdf
-                    $path = $file->store("vouchers/{$type}", 'public');
+                    $path = $file->store("attachments/{$type}", 'public_uploads');
                     if ($path) {
                         $attachments[] = $path;
                         Log::info("[Voucher] Attachment stored: {$path}");
@@ -132,7 +128,7 @@ class VoucherController extends Controller
             $newAttachments = [];
             if ($request->hasFile('att')) {
                 foreach ($request->file('att') as $file) {
-                    $path = $file->store("vouchers/{$type}", 'public');
+                    $path = $file->store("attachments/{$type}", 'public_uploads');
                     if ($path) {
                         $newAttachments[] = $path;
                         Log::info("[Voucher] New attachment stored: {$path}");
@@ -174,8 +170,8 @@ class VoucherController extends Controller
 
                 if (is_array($paths)) {
                     foreach ($paths as $path) {
-                        if (Storage::disk('public')->exists($path)) {
-                            Storage::disk('public')->delete($path);
+                        if (Storage::disk('public_uploads')->exists($path)) {
+                            Storage::disk('public_uploads')->delete($path);
                         }
                     }
                 }
