@@ -11,8 +11,9 @@
     </div>
 @endif
 @if(session('error'))
-    <div class="alert alert-danger alert-dismissible">
+    <div class="alert alert-danger alert-dismissible" id="global-error-alert">
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        <i class="fas fa-exclamation-triangle me-1"></i>
         {{ session('error') }}
     </div>
 @endif
@@ -69,7 +70,7 @@
                                           : 'fa-file text-secondary');
                                 $fileName = basename($file);
                             @endphp
-                            <a href="{{ asset('public/uploads/' . $file) }}"
+                            <a href="{{ asset('uploads/' . $file) }}"
                                target="_blank"
                                title="{{ $fileName }}"
                                class="me-1 d-inline-block">

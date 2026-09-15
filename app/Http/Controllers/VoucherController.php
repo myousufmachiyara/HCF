@@ -50,26 +50,63 @@ class VoucherController extends Controller
     public function store(Request $request, $type)
     {
         try {
+            // ── Detect PHP silent upload failure ──────────────────
+            // When file exceeds PHP's post_max_size or upload_max_filesize,
+            // PHP silently drops the entire request body. Laravel sees an
+            // empty request with no error — voucher fails with no message.
+            if (
+                $_SERVER['REQUEST_METHOD'] === 'POST' &&
+                (int) $_SERVER['CONTENT_LENGTH'] > 0 &&
+                empty($_POST) && empty($_FILES)
+            ) {
+                $limit = ini_get('post_max_size');
+                return back()->with('error',
+                    "Upload failed: file size exceeds the server limit ({$limit}). " .
+                    "Please upload a smaller file or no attachment."
+                );
+            }
+
             $request->validate([
                 'date'      => 'required|date',
                 'ac_dr_sid' => 'required|numeric',
                 'ac_cr_sid' => 'required|numeric|different:ac_dr_sid',
                 'amount'    => 'required|numeric|min:1',
                 'remarks'   => 'nullable|string',
-                'att.*'     => 'nullable|file|max:5120',
+                'att.*'     => 'nullable|file|max:10240|mimes:jpg,jpeg,png,gif,webp,pdf,zip,doc,docx,xls,xlsx',
+            ], [
+                'att.*.max'   => 'Each attachment must be under 10MB.',
+                'att.*.mimes' => 'Allowed file types: jpg, png, pdf, zip, doc, xls.',
             ]);
 
             // ── Store attachments ──────────────────────────────────
-            // Path: storage/app/public/attachments/{type}/filename
-            // Public URL: /storage/attachments/{type}/filename
             $attachments = [];
             if ($request->hasFile('att')) {
-                foreach ($request->file('att') as $file) {
-                    $path = $file->store("attachments/{$type}", 'public_uploads');
-                    if ($path) {
-                        $attachments[] = $path;
-                        Log::info("[Voucher] Attachment stored: {$path}");
+                foreach ($request->file('att') as $index => $file) {
+                    // Check PHP-level upload error codes explicitly
+                    if (!$file->isValid()) {
+                        $errorMsg = [
+                            UPLOAD_ERR_INI_SIZE   => 'File exceeds server upload_max_filesize limit.',
+                            UPLOAD_ERR_FORM_SIZE  => 'File exceeds MAX_FILE_SIZE limit.',
+                            UPLOAD_ERR_PARTIAL    => 'File was only partially uploaded.',
+                            UPLOAD_ERR_NO_FILE    => 'No file was uploaded.',
+                            UPLOAD_ERR_NO_TMP_DIR => 'Missing temp folder on server.',
+                            UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk.',
+                            UPLOAD_ERR_EXTENSION  => 'Upload blocked by PHP extension.',
+                        ][$file->getError()] ?? 'Unknown upload error (code ' . $file->getError() . ').';
+
+                        return back()->withInput()
+                            ->with('error', "Attachment " . ($index + 1) . ": {$errorMsg}");
                     }
+
+                    $path = $file->store("attachments/{$type}", 'public_uploads');
+
+                    if (!$path) {
+                        return back()->withInput()
+                            ->with('error', "Failed to save attachment " . ($index + 1) . ". Check folder permissions.");
+                    }
+
+                    $attachments[] = $path;
+                    Log::info("[Voucher] Attachment stored: {$path}");
                 }
             }
 
@@ -80,9 +117,6 @@ class VoucherController extends Controller
                 'ac_cr_sid'    => $request->ac_cr_sid,
                 'amount'       => $request->amount,
                 'remarks'      => $request->remarks,
-                // FIX: json_encode so it saves as valid JSON in the DB column.
-                // If your Voucher model already has 'attachments' => 'array'
-                // in $casts, pass the array directly (remove json_encode).
                 'attachments'  => json_encode($attachments),
             ]);
 
@@ -92,12 +126,18 @@ class VoucherController extends Controller
 
             return back()->with('success', ucfirst($type) . ' voucher added successfully!');
 
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // Flatten all validation messages into one flash message
+            // so they show in the modal's session alert div
+            $errors = collect($e->errors())->flatten()->join(' | ');
+            return back()->withInput()->with('error', 'Validation failed: ' . $errors);
+
         } catch (\Throwable $e) {
             Log::error("[Voucher] Store {$type} error: " . $e->getMessage(), [
                 'trace'   => $e->getTraceAsString(),
                 'request' => $request->except(['att']),
             ]);
-            return back()->with('error', 'Something went wrong: ' . $e->getMessage());
+            return back()->withInput()->with('error', 'Something went wrong: ' . $e->getMessage());
         }
     }
 
