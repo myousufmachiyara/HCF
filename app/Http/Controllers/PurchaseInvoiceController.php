@@ -404,7 +404,7 @@ class PurchaseInvoiceController extends Controller
 
         $pdf = new \TCPDF(PDF_PAGE_ORIENTATION, PDF_UNIT, PDF_PAGE_FORMAT, true, 'UTF-8', false);
         $pdf->SetCreator('BillTrix');
-        $pdf->SetAuthor('Lucky Corporation');
+        $pdf->SetAuthor('FFK');
         $pdf->SetTitle('PUR-' . $invoice->invoice_no);
         $pdf->setPrintHeader(false);
         $pdf->setPrintFooter(false);
