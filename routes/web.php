@@ -23,6 +23,10 @@ use App\Http\Controllers\{
     SaleReturnController,
     PermissionController,
     ProductSubcategoryController,
+    PsxStockController,
+    PsxBrokerController,
+    PsxTradeController,
+    PsxReportController,
 };
 
 Auth::routes();
@@ -70,6 +74,10 @@ Route::middleware(['auth'])->group(function () {
 
         // Vouchers
         'vouchers' => ['controller' => VoucherController::class, 'permission' => 'vouchers'],
+
+        // PSX Trading - masters
+        'psx_stocks' => ['controller' => PsxStockController::class, 'permission' => 'psx_stocks'],
+        'psx_brokers' => ['controller' => PsxBrokerController::class, 'permission' => 'psx_brokers'],
     ];
 
     foreach ($modules as $uri => $config) {
@@ -109,12 +117,18 @@ Route::middleware(['auth'])->group(function () {
         Route::get("$uri/$param/print", [$controller, 'print'])->middleware("check.permission:$permission.print")->name("$uri.print");
     }
 
-    // Reports (readonly)
+    // PSX Trading - DEMO screens (read only: no store/update/delete, no vouchers)
+    Route::get('psx_trades', [PsxTradeController::class, 'index'])->middleware('check.permission:psx_trades.index')->name('psx_trades.index');
+    Route::get('psx_trades/create', [PsxTradeController::class, 'create'])->middleware('check.permission:psx_trades.create')->name('psx_trades.create');
+
+        // Reports (readonly)
     Route::prefix('reports')->name('reports.')->group(function () {
         Route::get('inventory', [InventoryReportController::class, 'inventoryReports'])->name('inventory');
         Route::get('purchase', [PurchaseReportController::class, 'purchaseReports'])->name('purchase');
         Route::get('sale', [SalesReportController::class, 'saleReports'])->name('sale');
         Route::get('accounts', [AccountsReportController::class, 'accounts'])->name('accounts');
+        Route::get('psx-holdings', [PsxReportController::class, 'holdings'])->middleware('check.permission:reports.psx_holdings')->name('psx_holdings');
+        Route::get('psx-profit-loss', [PsxReportController::class, 'profitLoss'])->middleware('check.permission:reports.psx_pl')->name('psx_pl');
     });
 
     Route::get('/get-location-stock', [ProductController::class, 'getLocationStock']);

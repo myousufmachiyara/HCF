@@ -211,5 +211,8 @@ class DatabaseSeeder extends Seeder
             ['id' => 4, 'name' => 'Bag',      'shortcode' => 'bag'],
             ['id' => 5, 'name' => 'Bundle',   'shortcode' => 'bundle'],
         ]);
+
+        // 📈 PSX Trading module (permissions + starter masters)
+        $this->call(PsxModuleSeeder::class);
     }
 }
