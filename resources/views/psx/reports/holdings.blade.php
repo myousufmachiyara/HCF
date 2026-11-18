@@ -10,17 +10,39 @@
 </style>
 <div class="row">
   <div class="col">
-    <div class="no-print">
-      @include('psx._demo_banner', [
-        'broker' => $broker,
-        'slot'   => 'Open positions are worked out from the sample trades: shares bought and not yet sold, using FIFO. Market prices you type are not saved.',
-      ])
-    </div>
+    <section class="card no-print mb-3">
+      <div class="card-body">
+        <form method="GET" action="{{ route('reports.psx_holdings') }}" class="row g-3 align-items-end">
+          <div class="col-md-3">
+            <label>Broker</label>
+            <select name="broker_id" class="form-control">
+              <option value="">All brokers</option>
+              @foreach ($brokers as $b)
+                <option value="{{ $b->id }}" {{ $filters['broker_id'] == $b->id ? 'selected' : '' }}>{{ $b->name }}</option>
+              @endforeach
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label>Stock</label>
+            <select name="symbol" class="form-control select2-js">
+              <option value="">All stocks</option>
+              @foreach ($symbols as $sym)
+                <option value="{{ $sym }}" {{ $filters['symbol'] === $sym ? 'selected' : '' }}>{{ $sym }}</option>
+              @endforeach
+            </select>
+          </div>
+          <div class="col-md-3">
+            <button class="btn btn-primary"><i class="fas fa-filter"></i> Filter</button>
+            <a href="{{ route('reports.psx_holdings') }}" class="btn btn-default">Reset</a>
+          </div>
+        </form>
+      </div>
+    </section>
 
     <div class="row mb-3">
       <div class="col-md-3 col-6 mb-2">
         <section class="card card-featured-left card-featured-primary"><div class="card-body py-3">
-          <small class="text-muted">Stocks held</small><h4 class="mb-0">{{ count($holdings) }}</h4>
+          <small class="text-muted">Stocks held</small><h4 class="mb-0">{{ count(array_unique(array_column($holdings, 'symbol'))) }}</h4>
         </div></section>
       </div>
       <div class="col-md-3 col-6 mb-2">
@@ -54,6 +76,7 @@
             <thead>
               <tr>
                 <th>Stock</th>
+                <th>Broker</th>
                 <th>Held Since</th>
                 <th class="text-end">Qty</th>
                 <th class="text-end">Avg Cost</th>
@@ -69,10 +92,11 @@
               @forelse ($holdings as $h)
               <tr class="h-row" data-qty="{{ $h['qty'] }}" data-cost="{{ $h['cost_value'] }}" data-last="{{ $h['last_price'] }}">
                 <td>
-                  <a href="#lots-{{ $h['symbol'] }}" data-bs-toggle="collapse" class="no-print" title="Show lots"><i class="fas fa-caret-right"></i></a>
+                  <a href="#lots-{{ $loop->index }}" data-bs-toggle="collapse" class="no-print" title="Show lots"><i class="fas fa-caret-right"></i></a>
                   <strong>{{ $h['symbol'] }}</strong>
                   @if($h['stock_name'])<br><small class="text-muted">{{ $h['stock_name'] }}</small>@endif
                 </td>
+                <td>{{ $h['broker'] }}</td>
                 <td>{{ \Carbon\Carbon::parse($h['since'])->format('d-M-Y') }}</td>
                 <td class="text-end">{{ number_format($h['qty']) }}</td>
                 <td class="text-end">{{ number_format($h['avg_cost'], 4) }}</td>
@@ -83,15 +107,15 @@
                 <td class="text-end mkt-pl">-</td>
                 <td class="text-end mkt-pct">-</td>
               </tr>
-              <tr id="lots-{{ $h['symbol'] }}" class="collapse lots-row">
-                <td colspan="10">
+              <tr id="lots-{{ $loop->index }}" class="collapse lots-row">
+                <td colspan="11">
                   <strong>Open lots ({{ count($h['lots']) }})</strong>, oldest first; these will be sold first (FIFO):
                   <table class="table table-sm mb-0 mt-1">
                     <thead><tr><th>Trade #</th><th>Type</th><th>Date</th><th class="text-end">Bought</th><th class="text-end">Still Held</th><th class="text-end">Price</th><th class="text-end">Value</th></tr></thead>
                     <tbody>
                       @foreach ($h['lots'] as $lot)
                       <tr>
-                        <td>{{ $lot['trade_no'] }}</td>
+                        <td>@if($lot['trade_id'])<a href="{{ route('psx_trades.show', $lot['trade_id']) }}">{{ $lot['trade_no'] }}</a>@else{{ $lot['trade_no'] }}@endif</td>
                         <td>{{ ucfirst($lot['type']) }}</td>
                         <td>{{ \Carbon\Carbon::parse($lot['date'])->format('d-M-Y') }}</td>
                         <td class="text-end">{{ number_format($lot['qty_original']) }}</td>
@@ -105,12 +129,12 @@
                 </td>
               </tr>
               @empty
-              <tr><td colspan="10" class="text-center text-muted">No open positions.</td></tr>
+              <tr><td colspan="11" class="text-center text-muted">No open positions.</td></tr>
               @endforelse
             </tbody>
             <tfoot>
               <tr class="fw-bold">
-                <td colspan="4" class="text-end">Total</td>
+                <td colspan="5" class="text-end">Total</td>
                 <td class="text-end">{{ number_format($totals['cost'], 2) }}</td>
                 <td class="text-end">{{ number_format($totals['commission'], 2) }}</td>
                 <td></td>
@@ -158,6 +182,7 @@
   }
 
   $(document).ready(function () {
+    $('.select2-js').select2({ width: '100%' });
     $('#holdingsTable').on('input', '.mkt-price', recalcHoldings);
     $('#useLastPrice').on('click', function () {
       $('.h-row').each(function () { $(this).find('.mkt-price').val($(this).data('last')); });

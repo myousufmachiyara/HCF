@@ -31,4 +31,9 @@ class PsxStock extends Model
     {
         return $query->where('is_active', true);
     }
+
+    public function tradeItems()
+    {
+        return $this->hasMany(PsxTradeItem::class);
+    }
 }

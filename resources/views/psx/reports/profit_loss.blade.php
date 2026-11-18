@@ -7,7 +7,7 @@
   $pl  = fn ($n) => $n > 0 ? 'text-success' : ($n < 0 ? 'text-danger' : '');
   $qs  = fn ($tab) => array_merge(['tab' => $tab], array_filter([
             'from_date' => $filters['from'], 'to_date' => $filters['to'],
-            'symbol' => $filters['symbol'], 'intraday' => $filters['intraday'],
+            'symbol' => $filters['symbol'], 'intraday' => $filters['intraday'], 'broker_id' => $filters['broker_id'],
          ]));
   $winRate = $summary['trades'] ? $summary['winning'] / $summary['trades'] * 100 : 0;
 @endphp
@@ -17,13 +17,6 @@
 </style>
 <div class="row">
   <div class="col">
-    <div class="no-print">
-      @include('psx._demo_banner', [
-        'broker' => $broker,
-        'slot'   => 'Realised profit and loss on the sample trades. Each sell is matched against the oldest buy (FIFO), so partly sold buys are handled automatically.',
-      ])
-    </div>
-
     {{-- Filters --}}
     <section class="card no-print mb-3">
       <div class="card-body">
@@ -38,7 +31,16 @@
               <label>Sold To</label>
               <input type="date" name="to_date" class="form-control" value="{{ $filters['to'] }}">
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
+              <label>Broker</label>
+              <select name="broker_id" class="form-control">
+                <option value="">All brokers</option>
+                @foreach ($brokers as $b)
+                  <option value="{{ $b->id }}" {{ $filters['broker_id'] == $b->id ? 'selected' : '' }}>{{ $b->name }}</option>
+                @endforeach
+              </select>
+            </div>
+            <div class="col-md-2">
               <label>Stock</label>
               <select name="symbol" class="form-control select2-js">
                 <option value="">All stocks</option>
@@ -55,10 +57,13 @@
                 <option value="no" {{ $filters['intraday'] === 'no' ? 'selected' : '' }}>Delivery only</option>
               </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
               <button class="btn btn-primary"><i class="fas fa-filter"></i> Filter</button>
               <a href="{{ route('reports.psx_pl', ['tab' => $tab]) }}" class="btn btn-default">Reset</a>
-              <button type="button" class="btn btn-default" onclick="window.print()"><i class="fas fa-print"></i></button>
+            </div>
+            <div class="col-12">
+              <button type="button" class="btn btn-default btn-sm" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+              <a href="{{ route('reports.psx_pl', array_merge($qs($tab), ['export' => 'csv'])) }}" class="btn btn-default btn-sm"><i class="fas fa-file-excel"></i> Export CSV (Excel)</a>
             </div>
           </div>
         </form>
@@ -163,6 +168,7 @@
                   <th class="text-end">Net P/L</th>
                   <th class="text-end">Net P/L %</th>
                   <th>Type</th>
+                  <th>Broker</th>
                   <th>Buy # / Sell #</th>
                 </tr>
               </thead>
@@ -194,7 +200,11 @@
                       <small class="text-muted">{{ $m['holding_days'] }}d</small>
                     @endif
                   </td>
-                  <td><small>{{ $m['buy_trade_no'] }} / {{ $m['sell_trade_no'] }}</small></td>
+                  <td><small>{{ $m['broker'] }}</small></td>
+                  <td><small>
+                    <a href="{{ route('psx_trades.show', $m['buy_trade_id']) }}">{{ $m['buy_trade_no'] }}</a> /
+                    <a href="{{ route('psx_trades.show', $m['sell_trade_id']) }}">{{ $m['sell_trade_no'] }}</a>
+                  </small></td>
                 </tr>
                 @endforeach
               </tbody>

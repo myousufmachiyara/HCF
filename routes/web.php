@@ -78,6 +78,7 @@ Route::middleware(['auth'])->group(function () {
         // PSX Trading - masters
         'psx_stocks' => ['controller' => PsxStockController::class, 'permission' => 'psx_stocks'],
         'psx_brokers' => ['controller' => PsxBrokerController::class, 'permission' => 'psx_brokers'],
+        'psx_trades' => ['controller' => PsxTradeController::class, 'permission' => 'psx_trades'],
     ];
 
     foreach ($modules as $uri => $config) {
@@ -116,10 +117,6 @@ Route::middleware(['auth'])->group(function () {
         Route::delete("$uri/$param", [$controller, 'destroy'])->middleware("check.permission:$permission.delete")->name("$uri.destroy");
         Route::get("$uri/$param/print", [$controller, 'print'])->middleware("check.permission:$permission.print")->name("$uri.print");
     }
-
-    // PSX Trading - DEMO screens (read only: no store/update/delete, no vouchers)
-    Route::get('psx_trades', [PsxTradeController::class, 'index'])->middleware('check.permission:psx_trades.index')->name('psx_trades.index');
-    Route::get('psx_trades/create', [PsxTradeController::class, 'create'])->middleware('check.permission:psx_trades.create')->name('psx_trades.create');
 
         // Reports (readonly)
     Route::prefix('reports')->name('reports.')->group(function () {

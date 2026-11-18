@@ -3,12 +3,12 @@
 namespace App\Services\Psx;
 
 /**
- * Sample trades for the PSX demo screens.
+ * Sample trades loaded by PsxSampleTradesSeeder (optional, for demos).
  * Converted from psx_trading_calculator.xlsx: every Excel row with a stock name
  * becomes a separate BUY and/or SELL trade (rows without a stock name or a
  * selling date are left out). Opening balances are SAMPLE figures only.
  *
- * Demo only - nothing here is written to the database.
+ * Only used by the seeder.
  */
 class DemoTradeData
 {

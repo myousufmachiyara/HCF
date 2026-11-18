@@ -43,4 +43,9 @@ class PsxBroker extends Model
     {
         return static::active()->orderByDesc('is_default')->orderBy('id')->first();
     }
+
+    public function trades()
+    {
+        return $this->hasMany(PsxTrade::class);
+    }
 }

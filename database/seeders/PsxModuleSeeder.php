@@ -13,6 +13,8 @@ use Spatie\Permission\PermissionRegistrar;
  * PSX Trading module - permissions + starter master data.
  * Safe to run more than once on an existing database:
  *   php artisan db:seed --class=PsxModuleSeeder
+ * Sample trades from the Excel (optional, for demos):
+ *   php artisan db:seed --class=PsxSampleTradesSeeder
  */
 class PsxModuleSeeder extends Seeder
 {

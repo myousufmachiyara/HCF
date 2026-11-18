@@ -5,16 +5,22 @@ namespace App\Services\Psx;
 /**
  * PSX trade matching engine (FIFO).
  *
- * Pure calculation - reads an array of trades, writes nothing to the database,
- * creates no vouchers. The same class will be reused when trades are stored.
+ * Pure calculation: takes an array of trade rows and returns matches,
+ * holdings and shortfalls. Writes nothing and creates no vouchers.
  *
- * Rules (from the client's Excel, with the recommended options):
- *   - Commission per trade  = MAX(min_per_share x qty, rate% x value)
+ * Rules:
+ *   - Commission per row = MAX(min_per_share x qty, rate% x value), unless a stored
+ *     'commission' is passed in (saved trades keep the commission worked out at entry).
  *   - Opening balances carry no commission.
- *   - Sells are matched against the oldest open buy lot first (FIFO).
- *   - Intraday: when a buy lot is matched with a sell on the SAME date,
- *     the buy commission for the matched quantity only is waived.
- *   - A sell larger than holdings is reported as a shortfall (would be blocked).
+ *   - Sells are matched against the oldest open buy lot of the same group first (FIFO).
+ *     The group is broker + stock for saved trades, so shares are sold from the broker
+ *     account that holds them.
+ *   - Intraday: when a buy lot is matched with a sell on the SAME date, the buy commission
+ *     for the matched quantity only is waived (if the buy's broker allows it).
+ *   - A sell larger than the holding is reported as a shortfall.
+ *
+ * Input row keys: date (Y-m-d), type (opening|buy|sell), symbol, qty, price,
+ *   optional: commission, other_charges, waiver (bool), group, broker, id, trade_id, trade_no, remarks.
  */
 class TradeMatcher
 {
@@ -39,30 +45,19 @@ class TradeMatcher
         );
     }
 
-    public function settings(): array
-    {
-        return [
-            'min_per_share'   => $this->minPerShare,
-            'rate_percent'    => $this->ratePercent,
-            'intraday_waiver' => $this->intradayWaiver,
-        ];
-    }
-
     public function commission(float $qty, float $price): float
     {
-        $value = $qty * $price;
-        return round(max($this->minPerShare * $qty, ($this->ratePercent / 100) * $value), 2);
+        return round(max($this->minPerShare * $qty, ($this->ratePercent / 100) * $qty * $price), 2);
     }
 
-    /**
-     * @param array $trades each: date (Y-m-d), type (opening|buy|sell), symbol, qty, price, [other_charges], [remarks]
-     */
     public function run(array $trades): array
     {
-        // 1. Normalise, sort and number the trades
+        // 1. Normalise and sort (date, then opening > buy > sell, then entry order)
+        $trades = array_values($trades);
         foreach ($trades as $i => &$t) {
             $t['seq']    = $i;
             $t['symbol'] = strtoupper(trim($t['symbol']));
+            $t['group']  = $t['group'] ?? $t['symbol'];
             $t['qty']    = (float) $t['qty'];
             $t['price']  = (float) $t['price'];
         }
@@ -73,10 +68,13 @@ class TradeMatcher
         );
 
         foreach ($trades as $i => &$t) {
-            $t['trade_no']      = 'PSX-' . str_pad($i + 1, 4, '0', STR_PAD_LEFT);
+            $t['trade_no']      = $t['trade_no'] ?? ('PSX-' . str_pad($i + 1, 4, '0', STR_PAD_LEFT));
             $t['value']         = round($t['qty'] * $t['price'], 2);
-            $t['commission']    = $t['type'] === 'opening' ? 0.0 : $this->commission($t['qty'], $t['price']);
+            $t['commission']    = $t['type'] === 'opening'
+                ? 0.0
+                : (isset($t['commission']) ? (float) $t['commission'] : $this->commission($t['qty'], $t['price']));
             $t['other_charges'] = (float) ($t['other_charges'] ?? 0);
+            $t['waiver']        = (bool) ($t['waiver'] ?? $this->intradayWaiver);
             $t['waived']        = 0.0;
             $t['net_amount']    = $t['type'] === 'sell'
                 ? $t['value'] - $t['commission'] - $t['other_charges']
@@ -84,38 +82,41 @@ class TradeMatcher
         }
         unset($t);
 
-        // 2. FIFO matching per symbol
-        $lots       = [];   // symbol => list of open lots
+        // 2. FIFO matching per group
+        $lots       = [];
         $matches    = [];
         $shortfalls = [];
-        $byNo       = [];   // trade_no => index in $trades (for waiver totals)
 
         foreach ($trades as $idx => $t) {
-            $byNo[$t['trade_no']] = $idx;
-            $sym = $t['symbol'];
+            $g = $t['group'];
 
             if ($t['type'] !== 'sell') {
-                $lots[$sym][] = [
+                $lots[$g][] = [
+                    'idx'          => $idx,
                     'trade_no'     => $t['trade_no'],
+                    'trade_id'     => $t['trade_id'] ?? null,
                     'type'         => $t['type'],
                     'date'         => $t['date'],
                     'price'        => $t['price'],
                     'qty_original' => $t['qty'],
                     'qty_open'     => $t['qty'],
                     'commission'   => $t['commission'],
+                    'waiver'       => $t['waiver'],
+                    'symbol'       => $t['symbol'],
+                    'broker'       => $t['broker'] ?? null,
                 ];
                 continue;
             }
 
             $remaining = $t['qty'];
-            while ($remaining > 0 && !empty($lots[$sym])) {
-                $lot = &$lots[$sym][0];
+            while ($remaining > 0 && !empty($lots[$g])) {
+                $lot = &$lots[$g][0];
                 $qty = min($remaining, $lot['qty_open']);
 
-                $buyComm  = $lot['commission'] * $qty / $lot['qty_original'];
-                $sellComm = $t['commission'] * $qty / $t['qty'];
-                $intraday = $lot['type'] === 'buy' && $lot['date'] === $t['date'];
-                $waived   = ($intraday && $this->intradayWaiver) ? $buyComm : 0.0;
+                $buyComm    = $lot['commission'] * $qty / $lot['qty_original'];
+                $sellComm   = $t['commission'] * $qty / $t['qty'];
+                $intraday   = $lot['type'] === 'buy' && $lot['date'] === $t['date'];
+                $waived     = ($intraday && $lot['waiver']) ? $buyComm : 0.0;
                 $buyCharged = $buyComm - $waived;
 
                 $purchaseValue = $qty * $lot['price'];
@@ -125,12 +126,15 @@ class TradeMatcher
                 $net           = $gross - $totalComm;
 
                 $matches[] = [
-                    'symbol'           => $sym,
+                    'symbol'           => $t['symbol'],
+                    'broker'           => $t['broker'] ?? null,
                     'buy_trade_no'     => $lot['trade_no'],
+                    'buy_trade_id'     => $lot['trade_id'],
                     'buy_type'         => $lot['type'],
                     'buy_date'         => $lot['date'],
                     'buy_price'        => $lot['price'],
                     'sell_trade_no'    => $t['trade_no'],
+                    'sell_trade_id'    => $t['trade_id'] ?? null,
                     'sell_date'        => $t['date'],
                     'sell_price'       => $t['price'],
                     'qty'              => $qty,
@@ -144,27 +148,31 @@ class TradeMatcher
                     'net_pl'           => round($net, 2),
                     'net_pl_percent'   => $purchaseValue > 0 ? round($net / $purchaseValue * 100, 2) : null,
                     'is_intraday'      => $intraday,
-                    'holding_days'     => (int) ((strtotime($t['date']) - strtotime($lot['date'])) / 86400),
+                    'holding_days'     => (int) round((strtotime($t['date']) - strtotime($lot['date'])) / 86400),
                 ];
 
                 if ($waived > 0) {
-                    $trades[$byNo[$lot['trade_no']]]['waived'] += $waived;
+                    $trades[$lot['idx']]['waived'] += $waived;
                 }
 
                 $lot['qty_open'] -= $qty;
                 $remaining       -= $qty;
-                if ($lot['qty_open'] <= 0) {
-                    array_shift($lots[$sym]);
+                if ($lot['qty_open'] <= 0.000001) {
+                    array_shift($lots[$g]);
                 }
                 unset($lot);
             }
 
-            if ($remaining > 0) {
+            if ($remaining > 0.000001) {
                 $shortfalls[] = [
                     'trade_no' => $t['trade_no'],
-                    'symbol'   => $sym,
+                    'trade_id' => $t['trade_id'] ?? null,
+                    'group'    => $g,
+                    'symbol'   => $t['symbol'],
+                    'broker'   => $t['broker'] ?? null,
                     'date'     => $t['date'],
                     'qty'      => $remaining,
+                    'held'     => $t['qty'] - $remaining,
                 ];
             }
         }
@@ -186,8 +194,8 @@ class TradeMatcher
     {
         $holdings = [];
 
-        foreach ($lots as $sym => $open) {
-            $open = array_values(array_filter($open, fn ($l) => $l['qty_open'] > 0));
+        foreach ($lots as $group => $open) {
+            $open = array_values(array_filter($open, fn ($l) => $l['qty_open'] > 0.000001));
             if (!$open) {
                 continue;
             }
@@ -196,8 +204,10 @@ class TradeMatcher
             $cost = array_sum(array_map(fn ($l) => $l['qty_open'] * $l['price'], $open));
             $comm = array_sum(array_map(fn ($l) => $l['commission'] * $l['qty_open'] / $l['qty_original'], $open));
 
-            $holdings[$sym] = [
-                'symbol'     => $sym,
+            $holdings[$group] = [
+                'group'      => $group,
+                'symbol'     => $open[0]['symbol'],
+                'broker'     => $open[0]['broker'],
                 'qty'        => $qty,
                 'avg_cost'   => $qty > 0 ? $cost / $qty : 0,
                 'cost_value' => round($cost, 2),
@@ -208,7 +218,7 @@ class TradeMatcher
             ];
         }
 
-        ksort($holdings);
+        uasort($holdings, fn ($a, $b) => [$a['symbol'], $a['broker']] <=> [$b['symbol'], $b['broker']]);
         return $holdings;
     }
 

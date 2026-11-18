@@ -49,6 +49,10 @@ class PsxBrokerController extends Controller
             return back()->with('error', 'The default broker cannot be deleted. Make another broker default first.');
         }
 
+        if ($broker->trades()->exists()) {
+            return back()->with('error', "{$broker->name} has trades and cannot be deleted. Mark it inactive instead.");
+        }
+
         $broker->delete();
 
         return redirect()->route('psx_brokers.index')->with('success', 'Broker deleted successfully.');

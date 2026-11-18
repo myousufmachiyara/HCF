@@ -35,7 +35,13 @@ class PsxStockController extends Controller
 
     public function destroy($id)
     {
-        PsxStock::findOrFail($id)->delete();
+        $stock = PsxStock::findOrFail($id);
+
+        if ($stock->tradeItems()->whereHas('trade')->exists()) {
+            return back()->with('error', "{$stock->symbol} is used in trades and cannot be deleted. Mark it inactive instead.");
+        }
+
+        $stock->delete();
 
         return redirect()->route('psx_stocks.index')->with('success', 'Stock deleted successfully.');
     }
