@@ -270,7 +270,7 @@
     $('#broker, #tradeDate').on('change', recalc);
     $('#tradeForm').on('submit', function () { $('#saveBtn').prop('disabled', true); });
 
-    if (ITEMS.length) { ITEMS.forEach(addRow); } else { addRow(); addRow(); }
+    if (ITEMS.length) { ITEMS.forEach(addRow); } else { addRow(); }
   });
 </script>
 @endsection
