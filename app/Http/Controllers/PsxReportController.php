@@ -86,7 +86,7 @@ class PsxReportController extends Controller
     private function csv(array $matches)
     {
         $headers = ['Stock', 'Broker', 'Purchase Date', 'Purchase Price', 'Selling Date', 'Selling Price', 'Matched Qty',
-            'Purchase Value', 'Selling Value', 'Buy Commission', 'Buy Commission Waived', 'Sell Commission', 'Total Commission',
+            'Purchase Value', 'Selling Value', 'Buy Commission', 'Sell Commission', 'Total Commission',
             'Gross P/L', 'Net P/L', 'Net P/L %', 'Type', 'Buy Trade #', 'Sell Trade #'];
 
         return response()->streamDownload(function () use ($matches, $headers) {
@@ -95,7 +95,7 @@ class PsxReportController extends Controller
             foreach ($matches as $m) {
                 fputcsv($out, [
                     $m['symbol'], $m['broker'], $m['buy_date'], $m['buy_price'], $m['sell_date'], $m['sell_price'], $m['qty'],
-                    $m['purchase_value'], $m['selling_value'], $m['buy_commission'], $m['buy_waived'], $m['sell_commission'],
+                    $m['purchase_value'], $m['selling_value'], $m['buy_commission'], $m['sell_commission'],
                     $m['total_commission'], $m['gross_pl'], $m['net_pl'], $m['net_pl_percent'],
                     $m['is_intraday'] ? 'Intraday' : ($m['buy_type'] === 'opening' ? 'Opening' : 'Delivery'),
                     $m['buy_trade_no'], $m['sell_trade_no'],

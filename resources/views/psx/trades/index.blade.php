@@ -33,8 +33,8 @@
       </div>
       <div class="col-md-3 col-6 mb-2">
         <section class="card card-featured-left card-featured-warning"><div class="card-body py-3">
-          <small class="text-muted">Commission (after intraday waiver)</small>
-          <h4 class="mb-0">Rs {{ number_format(array_sum(array_column($rows, 'commission')) - array_sum(array_column($rows, 'waived')), 2) }}</h4>
+          <small class="text-muted">Commission charged</small>
+          <h4 class="mb-0">Rs {{ number_format(array_sum(array_column($rows, 'commission_charged')), 2) }}</h4>
         </div></section>
       </div>
     </div>
@@ -83,7 +83,6 @@
                 <th class="text-end">Price</th>
                 <th class="text-end">Value</th>
                 <th class="text-end">Commission</th>
-                <th class="text-end">Intraday Waived</th>
                 <th class="text-end">Other Charges</th>
                 <th class="text-end">Net Amount</th>
                 <th>Remarks</th>
@@ -104,10 +103,12 @@
                 <td class="text-end">{{ number_format($t['qty']) }}</td>
                 <td class="text-end">{{ number_format($t['price'], 2) }}</td>
                 <td class="text-end">{{ number_format($t['value'], 2) }}</td>
-                <td class="text-end">{{ number_format($t['commission'], 2) }}</td>
-                <td class="text-end {{ $t['waived'] > 0 ? 'text-success' : 'text-muted' }}">{{ $t['waived'] > 0 ? number_format($t['waived'], 2) : '-' }}</td>
+                <td class="text-end">
+                  {{ number_format($t['commission_charged'], 2) }}
+                  @if ($t['intraday_qty'] > 0)<br><span class="badge bg-info" title="No buy commission on {{ number_format($t['intraday_qty']) }} shares sold the same day">Intraday</span>@endif
+                </td>
                 <td class="text-end">{{ $t['other_charges'] > 0 ? number_format($t['other_charges'], 2) : '-' }}</td>
-                <td class="text-end">{{ number_format($t['net_amount'], 2) }}</td>
+                <td class="text-end">{{ number_format($t['net_charged'], 2) }}</td>
                 <td><small>{{ $t['remarks'] }}</small></td>
                 <td class="text-nowrap">
                   <a href="{{ route('psx_trades.show', $t['trade_id']) }}" class="text-dark me-1" title="View"><i class="fas fa-eye"></i></a>
@@ -134,6 +135,7 @@
         <small class="text-muted">
           One line per stock row. A trade (#) can hold several rows; edit, print and delete apply to the whole trade.
           Net amount: for a buy, value + charges (paid to the broker); for a sell, value − charges (received).
+          Same-day (intraday) trades carry one commission, on the sell; the buy shows no commission.
         </small>
       </div>
     </section>

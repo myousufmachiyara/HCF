@@ -12,7 +12,8 @@ namespace App\Services\Psx;
  *   - Commission per row = MAX(min_per_share x qty, rate% x value), unless a stored
  *     'commission' is passed in (saved trades keep the commission worked out at entry).
  *   - Opening balances carry no commission.
- *   - Sells are matched against the oldest open buy lot of the same group first (FIFO).
+ *   - A sell is matched first against buys of the SAME DATE (day trade), then against the
+ *     oldest open lots of the same group (FIFO).
  *     The group is broker + stock for saved trades, so shares are sold from the broker
  *     account that holds them.
  *   - Intraday: when a buy lot is matched with a sell on the SAME date, the buy commission
@@ -108,6 +109,14 @@ class TradeMatcher
                 continue;
             }
 
+            // Same-day buys are matched first (a day trade: one commission), then older lots FIFO
+            if (!empty($lots[$g])) {
+                usort($lots[$g], fn ($a, $b) =>
+                    [($a['type'] === 'buy' && $a['date'] === $t['date']) ? 0 : 1, $a['date'], $a['idx']]
+                    <=> [($b['type'] === 'buy' && $b['date'] === $t['date']) ? 0 : 1, $b['date'], $b['idx']]
+                );
+            }
+
             $remaining = $t['qty'];
             while ($remaining > 0 && !empty($lots[$g])) {
                 $lot = &$lots[$g][0];
@@ -177,8 +186,16 @@ class TradeMatcher
             }
         }
 
+        // Commission actually charged per row: a buy sold the same day carries no commission
         foreach ($trades as &$t) {
-            $t['waived'] = round($t['waived'], 2);
+            $t['waived']             = round($t['waived'], 2);
+            $t['commission_charged'] = round($t['commission'] - $t['waived'], 2);
+            $t['net_charged']        = $t['type'] === 'sell'
+                ? $t['value'] - $t['commission_charged'] - $t['other_charges']
+                : $t['value'] + $t['commission_charged'] + $t['other_charges'];
+            $t['intraday_qty']       = $t['commission'] > 0 && $t['type'] === 'buy'
+                ? round($t['qty'] * $t['waived'] / $t['commission'], 2)
+                : 0.0;
         }
         unset($t);
 
@@ -196,6 +213,7 @@ class TradeMatcher
 
         foreach ($lots as $group => $open) {
             $open = array_values(array_filter($open, fn ($l) => $l['qty_open'] > 0.000001));
+            usort($open, fn ($a, $b) => [$a['date'], $a['idx']] <=> [$b['date'], $b['idx']]);
             if (!$open) {
                 continue;
             }

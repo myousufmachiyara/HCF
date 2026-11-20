@@ -109,7 +109,7 @@
               </tr>
               <tr id="lots-{{ $loop->index }}" class="collapse lots-row">
                 <td colspan="11">
-                  <strong>Open lots ({{ count($h['lots']) }})</strong>, oldest first; these will be sold first (FIFO):
+                  <strong>Open lots ({{ count($h['lots']) }})</strong>, oldest first. These are sold first (FIFO), except shares bought and sold on the same day, which are matched together:
                   <table class="table table-sm mb-0 mt-1">
                     <thead><tr><th>Trade #</th><th>Type</th><th>Date</th><th class="text-end">Bought</th><th class="text-end">Still Held</th><th class="text-end">Price</th><th class="text-end">Value</th></tr></thead>
                     <tbody>

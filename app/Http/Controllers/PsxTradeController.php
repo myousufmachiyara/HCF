@@ -175,11 +175,12 @@ class PsxTradeController extends Controller
         $trade  = PsxTrade::with(['items.stock', 'broker', 'creator'])->findOrFail($id);
         $result = $this->portfolio->result();
 
-        $waived = collect($result['trades'])->where('trade_id', $trade->id)->pluck('waived', 'id');
+        // per row: commission actually charged (a buy sold the same day carries none)
+        $calc = collect($result['trades'])->where('trade_id', $trade->id)->keyBy('id');
 
         return [
             'trade'   => $trade,
-            'waived'  => $waived,
+            'calc'    => $calc,
             'sells'   => array_values(array_filter($result['matches'], fn ($m) => $m['sell_trade_id'] === $trade->id)),
             'buys'    => array_values(array_filter($result['matches'], fn ($m) => $m['buy_trade_id'] === $trade->id && $m['sell_trade_id'] !== $trade->id)),
         ];
@@ -188,6 +189,12 @@ class PsxTradeController extends Controller
     /** Validates the form and works out value / commission / net for each row (server side). */
     private function validated(Request $request): array
     {
+        // Ignore completely empty rows (no stock, qty or price)
+        $request->merge(['items' => array_values(array_filter(
+            (array) $request->input('items', []),
+            fn ($r) => is_array($r) && (filled($r['psx_stock_id'] ?? null) || filled($r['qty'] ?? null) || filled($r['price'] ?? null))
+        ))]);
+
         $data = $request->validate([
             'trade_date'            => 'required|date',
             'psx_broker_id'         => 'required|exists:psx_brokers,id',

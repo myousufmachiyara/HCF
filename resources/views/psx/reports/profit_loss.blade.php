@@ -90,7 +90,7 @@
     </div>
     <p class="text-muted small mb-3">
       Turnover (selling value) Rs {{ number_format($summary['turnover'], 2) }}.
-      {{ $summary['intraday'] }} intraday matches; Rs {{ number_format($summary['waived'], 2) }} buy commission waived.
+      {{ $summary['intraday'] }} intraday (same-day) matches, charged commission on the sell side only.
     </p>
 
     <div class="tabs">
@@ -185,7 +185,6 @@
                   <td class="text-end">{{ number_format($m['selling_value'], 2) }}</td>
                   <td class="text-end">
                     {{ number_format($m['buy_commission'], 2) }}
-                    @if($m['buy_waived'] > 0)<br><small class="text-success" title="Intraday waiver">−{{ number_format($m['buy_waived'], 2) }} waived</small>@endif
                   </td>
                   <td class="text-end">{{ number_format($m['sell_commission'], 2) }}</td>
                   <td class="text-end">{{ number_format($m['total_commission'], 2) }}</td>
