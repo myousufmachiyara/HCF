@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\PsxBroker;
 use App\Models\PsxStock;
 use App\Models\PsxTrade;
+use App\Support\DashboardPeriod;
 use Carbon\Carbon;
 use App\Services\Psx\PsxPortfolioService;
 use App\Services\Psx\TradeMatcher;
@@ -22,7 +23,7 @@ class PsxReportController extends Controller
     {
         $brokerId = $request->integer('broker_id') ?: null;
         $period   = $request->input('period', 'month');
-        [$from, $to] = $this->periodRange($period, $request->input('from_date'), $request->input('to_date'));
+        [$from, $to] = DashboardPeriod::range($period, $request->input('from_date'), $request->input('to_date'));
 
         $result = $this->portfolio->result($brokerId);
         $inRange = fn ($date) => (!$from || $date >= $from) && (!$to || $date <= $to);
@@ -113,22 +114,6 @@ class PsxReportController extends Controller
                 'all_net'     => array_sum(array_column($result['matches'], 'net_pl')),
             ],
         ]);
-    }
-
-    /** [from, to] as Y-m-d (null = open) for a period preset. */
-    private function periodRange(string $period, ?string $from, ?string $to): array
-    {
-        $today = Carbon::today();
-
-        return match ($period) {
-            'today'  => [$today->toDateString(), $today->toDateString()],
-            'week'   => [$today->copy()->startOfWeek()->toDateString(), $today->toDateString()],
-            '30d'    => [$today->copy()->subDays(29)->toDateString(), $today->toDateString()],
-            'month'  => [$today->copy()->startOfMonth()->toDateString(), $today->toDateString()],
-            'year'   => [$today->copy()->startOfYear()->toDateString(), $today->toDateString()],
-            'custom' => [$from ?: null, $to ?: null],
-            default  => [null, null],   // all time
-        };
     }
 
     public function holdings(Request $request)
