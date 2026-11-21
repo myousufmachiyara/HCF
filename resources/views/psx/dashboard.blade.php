@@ -25,7 +25,7 @@
     --neg: #e34948;      /* loss */
     --other: #b4b2a9;    /* 'Other' group: several stocks added together */
   }
-  .psx-dash .tiles { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  .psx-dash .tiles { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr)); }
   .psx-dash .tiles > * { min-width: 0; }
   .psx-dash .tiles .card { margin-bottom: 0; }
   .psx-dash .kpi { height: 100%; }
