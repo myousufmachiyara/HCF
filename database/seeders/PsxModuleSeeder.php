@@ -27,6 +27,7 @@ class PsxModuleSeeder extends Seeder
                 $names[] = "$module.$action";
             }
         }
+        $names[] = 'reports.psx_dashboard';
         $names[] = 'reports.psx_holdings';
         $names[] = 'reports.psx_pl';
 

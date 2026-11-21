@@ -124,6 +124,7 @@ Route::middleware(['auth'])->group(function () {
         Route::get('purchase', [PurchaseReportController::class, 'purchaseReports'])->name('purchase');
         Route::get('sale', [SalesReportController::class, 'saleReports'])->name('sale');
         Route::get('accounts', [AccountsReportController::class, 'accounts'])->name('accounts');
+        Route::get('psx-dashboard', [PsxReportController::class, 'dashboard'])->middleware('check.permission:reports.psx_dashboard')->name('psx_dashboard');
         Route::get('psx-holdings', [PsxReportController::class, 'holdings'])->middleware('check.permission:reports.psx_holdings')->name('psx_holdings');
         Route::get('psx-profit-loss', [PsxReportController::class, 'profitLoss'])->middleware('check.permission:reports.psx_pl')->name('psx_pl');
     });

@@ -200,4 +200,31 @@ class PsxModuleTest extends TestCase
         $this->assertEquals(50, $k['buy_commission']);
         $this->assertEquals(0, $k['net_pl']);
     }
+
+    public function test_dashboard_all_periods_filters_and_empty_state(): void
+    {
+        $this->get('/reports/psx-dashboard')->assertOk()->assertSee('No shares sold in this period.')->assertSee('No trades yet.');
+
+        $this->seed(PsxSampleTradesSeeder::class);
+        foreach (['today', 'week', 'month', '30d', 'year', 'all'] as $p) {
+            $this->get("/reports/psx-dashboard?period=$p")->assertOk();
+        }
+        $this->get('/reports/psx-dashboard?period=custom&from_date=2026-11-01&to_date=2026-11-05&broker_id=1')->assertOk();
+
+        // all-time figures match the P/L service
+        $r = app(PsxPortfolioService::class)->result();
+        $net = array_sum(array_column($r['matches'], 'net_pl'));
+        $html = $this->get('/reports/psx-dashboard?period=all')->assertOk()
+            ->assertSee('Realised net P/L by selling day')->assertSee('Module summary')->getContent();
+        $this->assertStringContainsString('Rs ' . number_format(abs($net)), $html);
+        $this->assertStringContainsString(count($r['matches']) . ' closed', $html);
+
+        // custom range only counts sells inside it
+        $inRange = array_filter($r['matches'], fn ($m) => $m['sell_date'] >= '2026-11-03' && $m['sell_date'] <= '2026-11-03');
+        $this->get('/reports/psx-dashboard?period=custom&from_date=2026-11-03&to_date=2026-11-03')
+            ->assertSee(count($inRange) . ' closed');
+
+        $u = User::factory()->create(['username' => 'nobody2']);
+        $this->actingAs($u)->get('/reports/psx-dashboard')->assertForbidden();
+    }
 }

@@ -150,10 +150,13 @@
           @endif
 
           {{-- PSX Trading --}}
-          @if(auth()->user()->can('psx_trades.index') || auth()->user()->can('psx_stocks.index') || auth()->user()->can('psx_brokers.index') || auth()->user()->can('reports.psx_holdings') || auth()->user()->can('reports.psx_pl'))
+          @if(auth()->user()->can('reports.psx_dashboard') || auth()->user()->can('psx_trades.index') || auth()->user()->can('psx_stocks.index') || auth()->user()->can('psx_brokers.index') || auth()->user()->can('reports.psx_holdings') || auth()->user()->can('reports.psx_pl'))
           <li class="nav-parent">
             <a class="nav-link" href="#"><i class="fa fa-chart-line"></i> <span>PSX Trading</span></a>
             <ul class="nav nav-children">
+              @can('reports.psx_dashboard')
+                <li><a class="nav-link" href="{{ route('reports.psx_dashboard') }}">Dashboard</a></li>
+              @endcan
               @can('psx_trades.index')
                 <li><a class="nav-link" href="{{ route('psx_trades.index') }}">Trades</a></li>
               @endcan
