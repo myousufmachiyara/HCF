@@ -5,7 +5,7 @@
 @section('content')
 @php
   $pl  = fn ($n) => $n > 0 ? 'text-success' : ($n < 0 ? 'text-danger' : '');
-  $qs  = fn ($tab) => array_merge(['tab' => $tab], array_filter([
+  $qs  = fn ($tab, $c = null) => array_merge(['tab' => $tab, 'cols' => $c ?? $cols], array_filter([
             'from_date' => $filters['from'], 'to_date' => $filters['to'],
             'symbol' => $filters['symbol'], 'intraday' => $filters['intraday'], 'broker_id' => $filters['broker_id'],
          ]));
@@ -70,34 +70,43 @@
       </div>
     </section>
 
-    {{-- Summary: net of commission --}}
+    {{-- Summary, laid out like the client's Excel summary block --}}
     <div class="row mb-1">
       @foreach ([
-        ['Shares sold (matched)', number_format($summary['qty']), 'primary', ''],
-        ['Cost incl. commission', 'Rs ' . number_format($summary['cost'], 2), 'info', ''],
-        ['Proceeds after commission', 'Rs ' . number_format($summary['proceeds'], 2), 'secondary', ''],
-        ['Net P/L', 'Rs ' . number_format($summary['net'], 2), 'success', $pl($summary['net'])],
-        ['Won / lost', $summary['winning'] . ' / ' . $summary['losing'], 'dark', ''],
-        ['Win rate', number_format($winRate, 1) . '%', 'warning', ''],
-      ] as [$label, $value, $colour, $cls])
+        ['Total trades', number_format($summary['trades']), 'primary', ''],
+        ['Total gross P/L', 'Rs ' . number_format($summary['gross'], 2), 'info', $pl($summary['gross'])],
+        ['Total commission', 'Rs ' . number_format($summary['commission'], 2), 'warning', ''],
+        ['Total net P/L', 'Rs ' . number_format($summary['net'], 2), 'success', $pl($summary['net'])],
+        ['Won / lost / even', $summary['winning'] . ' / ' . $summary['losing'] . ' / ' . $summary['even'], 'dark', ''],
+        ['Win rate', number_format($winRate, 1) . '%', 'secondary', ''],
+      ] as [$cardLabel, $value, $colour, $cls])
       <div class="col-xl-2 col-md-4 col-6 mb-2">
         <section class="card card-featured-left card-featured-{{ $colour }}"><div class="card-body py-3">
-          <small class="text-muted">{{ $label }}</small>
+          <small class="text-muted">{{ $cardLabel }}</small>
           <h4 class="mb-0 {{ $cls }}">{{ $value }}</h4>
         </div></section>
       </div>
       @endforeach
     </div>
     <p class="text-muted small mb-3">
-      Cost includes the buy commission and proceeds are after the sell commission, so every figure is net.
-      A same-day (intraday) trade carries one commission, on the sale.
-      @can('reports.psx_commission')<a href="{{ route('reports.psx_commission', array_filter(['period' => 'custom', 'from_date' => $filters['from'], 'to_date' => $filters['to'], 'broker_id' => $filters['broker_id']])) }}" class="no-print">See commission paid</a>.@endcan
+      A trade is one sale. Each sale is matched with the purchase it was paired with (the same row in the Excel sheet, or the purchase chosen on the trade);
+      otherwise with shares bought the same day, then the oldest. Net P/L = gross − commission; a same-day trade carries one commission, on the sale.
+      Commission is rounded to the paisa on each trade, so totals can differ from Excel by a few paisa.
+      @can('reports.psx_commission')<a href="{{ route('reports.psx_commission', array_filter(['period' => 'custom', 'from_date' => $filters['from'], 'to_date' => $filters['to'], 'broker_id' => $filters['broker_id']])) }}" class="no-print">Commission report</a>.@endcan
     </p>
 
     <div class="tabs">
       <ul class="nav nav-tabs no-print">
         <li class="nav-item"><a class="nav-link {{ $tab === 'TW' ? 'active' : '' }}" href="{{ route('reports.psx_pl', $qs('TW')) }}">Trade-wise</a></li>
         <li class="nav-item"><a class="nav-link {{ $tab === 'SW' ? 'active' : '' }}" href="{{ route('reports.psx_pl', $qs('SW')) }}">Stock-wise</a></li>
+        @if ($tab === 'TW')
+        <li class="nav-item ms-auto">
+          <div class="btn-group btn-group-sm mt-1" role="group" aria-label="Columns">
+            <a href="{{ route('reports.psx_pl', $qs('TW', 'net')) }}" class="btn btn-{{ $cols === 'net' ? 'primary' : 'default' }}">Net view</a>
+            <a href="{{ route('reports.psx_pl', $qs('TW', 'excel')) }}" class="btn btn-{{ $cols === 'excel' ? 'primary' : 'default' }}">Excel columns</a>
+          </div>
+        </li>
+        @endif
       </ul>
 
       <div class="tab-content">
@@ -145,6 +154,74 @@
                   <td class="text-end">{{ $summary['winning'] }} / {{ $summary['losing'] }}</td>
                 </tr>
               </tfoot>
+            </table>
+          </div>
+        </div>
+        @elseif ($cols === 'excel')
+        <div class="tab-pane fade show active">
+          <div class="table-responsive">
+            <table class="table table-bordered table-striped table-hover table-sm mb-0" id="plTable">
+              <thead>
+                <tr>
+                  <th>Stock</th>
+                  <th>Purchase date</th>
+                  <th>Selling date</th>
+                  <th class="text-end">Purchase price</th>
+                  <th class="text-end">Selling price</th>
+                  <th class="text-end">Matched qty</th>
+                  <th class="text-end">Purchase value</th>
+                  <th class="text-end">Selling value</th>
+                  <th class="text-end">Buy comm.</th>
+                  <th class="text-end">Sell comm.</th>
+                  <th class="text-end">Total comm.</th>
+                  <th class="text-end">Gross P/L</th>
+                  <th class="text-end">Net P/L</th>
+                  <th class="text-end">Net P/L %</th>
+                  <th>Type</th>
+                  <th>Buy # / Sell #</th>
+                </tr>
+              </thead>
+              <tbody>
+                @foreach ($matches as $m)
+                <tr>
+                  <td><strong>{{ $m['symbol'] }}</strong></td>
+                  <td data-order="{{ $m['buy_date'] }}">{{ \Carbon\Carbon::parse($m['buy_date'])->format('d-M-Y') }}</td>
+                  <td data-order="{{ $m['sell_date'] }}">{{ \Carbon\Carbon::parse($m['sell_date'])->format('d-M-Y') }}</td>
+                  <td class="text-end">{{ number_format($m['buy_price'], 2) }}</td>
+                  <td class="text-end">{{ number_format($m['sell_price'], 2) }}</td>
+                  <td class="text-end">{{ number_format($m['qty']) }}</td>
+                  <td class="text-end">{{ number_format($m['purchase_value'], 2) }}</td>
+                  <td class="text-end">{{ number_format($m['selling_value'], 2) }}</td>
+                  <td class="text-end">{{ number_format($m['buy_commission'], 2) }}</td>
+                  <td class="text-end">{{ number_format($m['sell_commission'], 2) }}</td>
+                  <td class="text-end">{{ number_format($m['total_commission'], 2) }}</td>
+                  <td class="text-end {{ $pl($m['gross_pl']) }}">{{ number_format($m['gross_pl'], 2) }}</td>
+                  <td class="text-end fw-bold {{ $pl($m['net_pl']) }}">{{ number_format($m['net_pl'], 2) }}</td>
+                  <td class="text-end {{ $pl($m['net_pl']) }}">{{ $m['net_pl_percent'] !== null ? number_format($m['net_pl_percent'], 2) . '%' : '-' }}</td>
+                  <td>{!! $m['is_intraday'] ? '<span class="badge bg-info">Intraday</span>' : '<span class="badge bg-secondary">' . ($m['buy_type'] === 'opening' ? 'Opening' : 'Delivery') . '</span>' !!}</td>
+                  <td><small>
+                    <a href="{{ route('psx_trades.show', $m['buy_trade_id']) }}">{{ $m['buy_trade_no'] }}</a> /
+                    <a href="{{ route('psx_trades.show', $m['sell_trade_id']) }}">{{ $m['sell_trade_no'] }}</a>
+                  </small></td>
+                </tr>
+                @endforeach
+              </tbody>
+              @if (count($matches))
+              <tfoot>
+                <tr class="fw-bold">
+                  <td colspan="5">Total of all {{ number_format(count($matches)) }} rows <small class="fw-normal text-muted">(use the Stock filter above for one stock)</small></td>
+                  <td class="text-end">{{ number_format($summary['qty']) }}</td>
+                  <td class="text-end">{{ number_format(array_sum(array_column($matches, 'purchase_value')), 2) }}</td>
+                  <td class="text-end">{{ number_format($summary['turnover'], 2) }}</td>
+                  <td class="text-end">{{ number_format(array_sum(array_column($matches, 'buy_commission')), 2) }}</td>
+                  <td class="text-end">{{ number_format(array_sum(array_column($matches, 'sell_commission')), 2) }}</td>
+                  <td class="text-end">{{ number_format($summary['commission'], 2) }}</td>
+                  <td class="text-end {{ $pl($summary['gross']) }}">{{ number_format($summary['gross'], 2) }}</td>
+                  <td class="text-end {{ $pl($summary['net']) }}">{{ number_format($summary['net'], 2) }}</td>
+                  <td colspan="3"></td>
+                </tr>
+              </tfoot>
+              @endif
             </table>
           </div>
         </div>
@@ -201,7 +278,7 @@
               @if (count($matches))
               <tfoot>
                 <tr class="fw-bold">
-                  <td colspan="3">Total</td>
+                  <td colspan="3">Total of all {{ number_format(count($matches)) }} rows <small class="fw-normal text-muted">(use the Stock filter above for one stock)</small></td>
                   <td class="text-end">{{ number_format($summary['qty']) }}</td>
                   <td></td>
                   <td class="text-end">{{ number_format($summary['cost'], 2) }}</td>

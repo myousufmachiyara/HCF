@@ -243,6 +243,7 @@ class PsxReportController extends Controller
             'brokers' => PsxBroker::orderBy('name')->get(['id', 'name']),
             'filters' => ['from' => $from, 'to' => $to, 'symbol' => $symbol, 'intraday' => $intraday, 'broker_id' => $brokerId],
             'tab'     => $tab,
+            'cols'    => $request->input('cols') === 'excel' ? 'excel' : 'net',
         ]);
     }
 

@@ -19,7 +19,8 @@ use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
  * Other columns are Excel formulas and are ignored; the system recalculates.
  *
  * Each row becomes a BUY (if the purchase side is filled) and a SELL (if the
- * selling side is filled). Rows are grouped into one trade per date.
+ * selling side is filled); the sell is linked to the buy on its own row, so the
+ * system pairs them exactly as the sheet does. Rows are grouped into one trade per date.
  * Commission is worked out from the chosen broker's settings, as on manual entry.
  */
 class PsxExcelImporter
@@ -155,8 +156,12 @@ class PsxExcelImporter
             $rows = app(PsxPortfolioService::class)->rows([], $broker->id);
         }
         $matcher = TradeMatcher::fromBroker($broker);
+        $buyRows = array_flip(array_column(array_filter($parsed['rows'], fn ($r) => $r['type'] === 'buy'), 'excel_row'));
         foreach ($parsed['rows'] as $i => $r) {
             $rows[] = $r + [
+                // each sale closes the purchase on its own Excel row
+                'key'        => $r['type'] === 'buy' ? 'r' . $r['excel_row'] : null,
+                'link'       => $r['type'] === 'sell' && isset($buyRows[$r['excel_row']]) ? 'r' . $r['excel_row'] : null,
                 'id'         => 'x' . $i,
                 'trade_no'   => 'Excel row ' . $r['excel_row'],
                 'group'      => $broker->id . '|' . $r['symbol'],
@@ -188,6 +193,7 @@ class PsxExcelImporter
             $deleted = 0;
             if ($replace) {
                 $deleted = PsxTrade::withTrashed()->count();
+                DB::table('psx_trade_items')->update(['buy_item_id' => null]);   // clear links first (self-referencing rows)
                 DB::table('psx_trade_items')->delete();
                 DB::table('psx_trades')->delete();
             }
@@ -206,6 +212,8 @@ class PsxExcelImporter
             $matcher = TradeMatcher::fromBroker($broker);
             $byDate  = collect($parsed['rows'])->groupBy('date')->sortKeys();
             $items   = 0;
+            $buyIds  = [];   // excel row => buy item id
+            $sells   = [];   // [sell item, excel row]
 
             foreach ($byDate as $date => $dayRows) {
                 $trade = PsxTrade::create([
@@ -221,7 +229,7 @@ class PsxExcelImporter
                 foreach ($ordered as $r) {
                     $value = round($r['qty'] * $r['price'], 2);
                     $comm  = $matcher->commission($r['qty'], $r['price']);
-                    $trade->items()->create([
+                    $item = $trade->items()->create([
                         'type'          => $r['type'],
                         'psx_stock_id'  => $stocks[$r['symbol']]->id,
                         'qty'           => $r['qty'],
@@ -233,6 +241,18 @@ class PsxExcelImporter
                         'remarks'       => $r['remarks'],
                     ]);
                     $items++;
+                    if ($r['type'] === 'buy') {
+                        $buyIds[$r['excel_row']] = $item->id;
+                    } else {
+                        $sells[] = [$item, $r['excel_row']];
+                    }
+                }
+            }
+
+            // Link each sale to the purchase on its own Excel row (after all rows exist)
+            foreach ($sells as [$item, $row]) {
+                if (isset($buyIds[$row])) {
+                    $item->update(['buy_item_id' => $buyIds[$row]]);
                 }
             }
 

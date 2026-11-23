@@ -21,10 +21,10 @@
 
     <div class="row mb-3">
       @foreach ([
-        ['Commission paid', 'Rs ' . $n($totals['total']), 'warning'],
-        ['On buys / on sells', 'Rs ' . $n($totals['buy_comm'], 0) . ' / ' . $n($totals['sell_comm'], 0), 'secondary'],
+        ['Commission on closed trades (as in Excel)', 'Rs ' . $n($totals['closed_comm']), 'warning'],
+        ['Commission paid on all trades', 'Rs ' . $n($totals['total']), 'secondary'],
         ['Not charged (same-day trades)', 'Rs ' . $n($totals['saved']), 'info'],
-        ['Realised net P/L', 'Rs ' . $n($totals['net_pl']), 'primary'],
+        ['Gross / net P/L', 'Rs ' . $n($totals['gross_pl'], 0) . ' / ' . $n($totals['net_pl'], 0), 'primary'],
       ] as [$cardLabel, $value, $colour])
       <div class="col-xl-3 col-md-6 mb-2">
         <section class="card card-featured-left card-featured-{{ $colour }}"><div class="card-body py-3">
@@ -44,11 +44,13 @@
                 <th>{{ $byNames[$filters['by']] }}</th>
                 <th class="num">Bought (value)</th>
                 <th class="num">Sold (value)</th>
-                <th class="num">Commission on buys</th>
-                <th class="num">Commission on sells</th>
-                <th class="num">Total commission</th>
+                <th class="num">Paid on buys</th>
+                <th class="num">Paid on sells</th>
+                <th class="num">Total paid</th>
                 <th class="num">Not charged<br><small>same-day buys</small></th>
-                <th class="num">Realised net P/L<br><small>after commission</small></th>
+                <th class="num">On closed trades<br><small>as in Excel</small></th>
+                <th class="num">Gross P/L</th>
+                <th class="num">Net P/L<br><small>gross − commission</small></th>
               </tr>
             </thead>
             <tbody>
@@ -61,10 +63,12 @@
                 <td class="num">{{ $n($r['sell_comm']) }}</td>
                 <td class="num fw-bold">{{ $n($r['total']) }}</td>
                 <td class="num text-muted">{{ $r['saved'] > 0 ? $n($r['saved']) : '–' }}</td>
+                <td class="num fw-bold">{{ $n($r['closed_comm']) }}</td>
+                <td class="num {{ $pl($r['gross_pl']) }}">{{ $n($r['gross_pl']) }}</td>
                 <td class="num fw-bold {{ $pl($r['net_pl']) }}">{{ $n($r['net_pl']) }}</td>
               </tr>
               @empty
-              <tr><td colspan="8" class="text-center text-muted">No trades in this period.</td></tr>
+              <tr><td colspan="10" class="text-center text-muted">No trades in this period.</td></tr>
               @endforelse
             </tbody>
             @if (count($rows))
@@ -77,6 +81,8 @@
                 <td class="num">{{ $n($totals['sell_comm']) }}</td>
                 <td class="num">{{ $n($totals['total']) }}</td>
                 <td class="num">{{ $n($totals['saved']) }}</td>
+                <td class="num">{{ $n($totals['closed_comm']) }}</td>
+                <td class="num {{ $pl($totals['gross_pl']) }}">{{ $n($totals['gross_pl']) }}</td>
                 <td class="num {{ $pl($totals['net_pl']) }}">{{ $n($totals['net_pl']) }}</td>
               </tr>
             </tfoot>
@@ -84,8 +90,10 @@
           </table>
         </div>
         <small class="text-muted d-block mt-2">
-          Commission is counted on the trade date. A buy that is sold the same day carries no commission; one commission is charged on the sale.
-          Commission on buys still held is part of their cost in Open Positions.
+          <strong>On closed trades</strong> is what the Excel sheet totals: the buy and sell commission of the shares sold, counted on the sale date. It is the commission inside the P/L.
+          <strong>Total paid</strong> counts every buy and sell on its trade date, including buys not sold yet; the difference is commission sitting in the cost of shares still held (see Open Positions).
+          A buy sold the same day carries no commission; one commission is charged on the sale.
+          Each commission is rounded to the paisa, as on a broker's bill, so totals can differ from Excel by a few paisa.
           @if ($totals['other'] > 0) Other charges entered on trades: Rs {{ $n($totals['other']) }}. @endif
         </small>
       </div>

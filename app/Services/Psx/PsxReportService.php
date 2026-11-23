@@ -121,8 +121,9 @@ class PsxReportService
     }
 
     /**
-     * Commission charged, grouped by month / day / stock / broker, with turnover and realised net P/L.
-     * Commission is counted on the trade date; a buy sold the same day carries none.
+     * Commission, grouped by month / day / stock / broker, two ways:
+     *  - paid: every buy and sell on its trade date (includes buys still held)
+     *  - on closed trades: buy + sell commission of the shares sold, on the sale date (as the client's Excel)
      */
     public function commission(?string $from, ?string $to, ?int $brokerId, string $by = 'month'): array
     {
@@ -136,7 +137,8 @@ class PsxReportService
         };
 
         $rows = [];
-        $blank = ['buy_value' => 0, 'sell_value' => 0, 'buy_comm' => 0, 'sell_comm' => 0, 'saved' => 0, 'other' => 0, 'net_pl' => 0, 'rows' => 0];
+        $blank = ['buy_value' => 0, 'sell_value' => 0, 'buy_comm' => 0, 'sell_comm' => 0, 'saved' => 0, 'other' => 0,
+                  'closed_comm' => 0, 'gross_pl' => 0, 'net_pl' => 0, 'rows' => 0];
         foreach ($result['trades'] as $t) {
             if ($t['type'] === 'opening' || !$inPeriod($t['date'])) {
                 continue;
@@ -155,7 +157,9 @@ class PsxReportService
             }
             $k = $key($m['sell_date'], $m['symbol'], $m['broker']);
             $rows[$k] ??= $blank;
-            $rows[$k]['net_pl'] += $m['net_pl'];
+            $rows[$k]['net_pl']      += $m['net_pl'];
+            $rows[$k]['gross_pl']    += $m['gross_pl'];
+            $rows[$k]['closed_comm'] += $m['total_commission'];   // as the client's Excel counts it
         }
 
         ksort($rows);

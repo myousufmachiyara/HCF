@@ -12,8 +12,10 @@ namespace App\Services\Psx;
  *   - Commission per row = MAX(min_per_share x qty, rate% x value), unless a stored
  *     'commission' is passed in (saved trades keep the commission worked out at entry).
  *   - Opening balances carry no commission.
- *   - A sell is matched first against buys of the SAME DATE (day trade), then against the
- *     oldest open lots of the same group (FIFO).
+ *   - A sell that names the purchase it closes ('link' = that buy's 'key') is matched against
+ *     that purchase first, as each row of the client's Excel does.
+ *   - Otherwise (or for any remainder) a sell is matched first against buys of the SAME DATE
+ *     (day trade), then against the oldest open lots of the same group (FIFO).
  *     The group is broker + stock for saved trades, so shares are sold from the broker
  *     account that holds them.
  *   - Intraday: when a buy lot is matched with a sell on the SAME date, the buy commission
@@ -21,7 +23,8 @@ namespace App\Services\Psx;
  *   - A sell larger than the holding is reported as a shortfall.
  *
  * Input row keys: date (Y-m-d), type (opening|buy|sell), symbol, qty, price,
- *   optional: commission, other_charges, waiver (bool), group, broker, id, trade_id, trade_no, remarks.
+ *   optional: commission, other_charges, waiver (bool), group, broker, id, trade_id, trade_no, remarks,
+ *   key (buys: identifies the purchase), link (sells: key of the purchase it closes).
  */
 class TradeMatcher
 {
@@ -94,6 +97,7 @@ class TradeMatcher
             if ($t['type'] !== 'sell') {
                 $lots[$g][] = [
                     'idx'          => $idx,
+                    'key'          => $t['key'] ?? null,
                     'trade_no'     => $t['trade_no'],
                     'trade_id'     => $t['trade_id'] ?? null,
                     'type'         => $t['type'],
@@ -109,11 +113,12 @@ class TradeMatcher
                 continue;
             }
 
-            // Same-day buys are matched first (a day trade: one commission), then older lots FIFO
+            // The named purchase first, then same-day buys (a day trade: one commission), then older lots FIFO
+            $link = $t['link'] ?? null;
             if (!empty($lots[$g])) {
                 usort($lots[$g], fn ($a, $b) =>
-                    [($a['type'] === 'buy' && $a['date'] === $t['date']) ? 0 : 1, $a['date'], $a['idx']]
-                    <=> [($b['type'] === 'buy' && $b['date'] === $t['date']) ? 0 : 1, $b['date'], $b['idx']]
+                    [($link !== null && $a['key'] === $link) ? 0 : 1, ($a['type'] === 'buy' && $a['date'] === $t['date']) ? 0 : 1, $a['date'], $a['idx']]
+                    <=> [($link !== null && $b['key'] === $link) ? 0 : 1, ($b['type'] === 'buy' && $b['date'] === $t['date']) ? 0 : 1, $b['date'], $b['idx']]
                 );
             }
 
@@ -144,6 +149,9 @@ class TradeMatcher
                     'buy_price'        => $lot['price'],
                     'sell_trade_no'    => $t['trade_no'],
                     'sell_trade_id'    => $t['trade_id'] ?? null,
+                    'sell_key'         => $t['id'] ?? $idx,          // the sale row (one sale can close several purchases)
+                    'buy_key'          => $lot['key'],
+                    'linked'           => $link !== null && $lot['key'] === $link,
                     'sell_date'        => $t['date'],
                     'sell_price'       => $t['price'],
                     'qty'              => $qty,
@@ -259,10 +267,18 @@ class TradeMatcher
     /** Excel-style portfolio summary for a list of matches. */
     public static function summary(array $matches): array
     {
-        $net = array_column($matches, 'net_pl');
+        // A "trade" is one sale (as a row of the client's Excel); a sale that closes
+        // several purchases is still one trade. Won / lost is judged per sale.
+        $bySale = [];
+        foreach ($matches as $m) {
+            $k = (string) $m['sell_key'];
+            $bySale[$k] = ($bySale[$k] ?? 0) + $m['net_pl'];
+        }
+        $net = array_values($bySale);
 
         return [
-            'trades'     => count($matches),
+            'trades'     => count($bySale),
+            'matches'    => count($matches),
             'qty'        => array_sum(array_column($matches, 'qty')),
             'turnover'   => array_sum(array_column($matches, 'selling_value')),
             'gross'      => array_sum(array_column($matches, 'gross_pl')),
@@ -271,9 +287,12 @@ class TradeMatcher
             'proceeds'   => array_sum(array_column($matches, 'sell_proceeds')),
             'waived'     => array_sum(array_column($matches, 'buy_waived')),
             'net'        => array_sum($net),
-            'winning'    => count(array_filter($net, fn ($v) => $v > 0)),
-            'losing'     => count(array_filter($net, fn ($v) => $v < 0)),
+            'winning'    => count(array_filter($net, fn ($v) => $v >= 0.005)),
+            'losing'     => count(array_filter($net, fn ($v) => $v <= -0.005)),
+            'even'       => count(array_filter($net, fn ($v) => abs($v) < 0.005)),   // break-even (net 0)
             'intraday'   => count(array_filter($matches, fn ($m) => $m['is_intraday'])),
+            'gross_won'  => array_sum(array_filter($net, fn ($v) => $v > 0)),
+            'gross_lost' => array_sum(array_filter($net, fn ($v) => $v < 0)),
         ];
     }
 }

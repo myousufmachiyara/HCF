@@ -33,7 +33,19 @@
     <tr>
       <td>{{ $loop->iteration }}</td>
       <td>{{ ucfirst($item->type) }}</td>
-      <td><strong>{{ $item->stock->symbol }}</strong> <small class="text-muted">{{ $item->stock->name }}</small></td>
+      <td>
+        <strong>{{ $item->stock->symbol }}</strong> <small class="text-muted">{{ $item->stock->name }}</small>
+        @if ($item->type === 'sell')
+          <br><small class="text-muted">Sold from:
+            @if ($item->buyItem && $item->buyItem->trade)
+              <a href="{{ route('psx_trades.show', $item->buyItem->psx_trade_id) }}">{{ $item->buyItem->trade->trade_no }}</a>
+              ({{ $item->buyItem->trade->trade_date->format('d-M-Y') }}, {{ number_format($item->buyItem->qty) }} @ {{ rtrim(rtrim(number_format($item->buyItem->price, 4), '0'), '.') }})
+            @else
+              auto (same day, then oldest)
+            @endif
+          </small>
+        @endif
+      </td>
       <td class="text-end">{{ number_format($item->qty) }}</td>
       <td class="text-end">{{ number_format($item->price, 4) }}</td>
       <td class="text-end">{{ number_format($item->value, 2) }}</td>

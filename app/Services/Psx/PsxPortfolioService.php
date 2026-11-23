@@ -43,6 +43,8 @@ class PsxPortfolioService
 
         return $items->map(fn ($i) => [
             'id'            => $i->id,
+            'key'           => $i->type === 'sell' ? null : (string) $i->id,
+            'link'          => $i->type === 'sell' && $i->buy_item_id ? (string) $i->buy_item_id : null,
             'trade_id'      => $i->psx_trade_id,
             'trade_no'      => $i->trade_no,
             'date'          => substr((string) $i->trade_date, 0, 10),

@@ -171,4 +171,25 @@ class PsxImportTest extends TestCase
         $this->assertStringStartsWith('"Trade #",Date,Broker', $lines[0]);
         $this->assertCount(1 + 181, $lines);   // heading + 180 Excel rows + 1 opening balance
     }
+
+    public function test_each_sale_is_paired_with_the_purchase_on_its_row(): void
+    {
+        // Two TRG purchases; row 3's sale belongs to row 3's (later, dearer) purchase, as in the sheet
+        $res = $this->preview($this->sheet([
+            ['TRG', '2026-11-02', 50, 1000],
+            ['TRG', '2026-11-03', 60, 1000, '2026-11-05', 58, 1000],
+        ]))->assertOk();
+        $this->post('/psx_trades/import/confirm', $this->token($res) + ['psx_broker_id' => 1, 'mode' => 'replace', 'confirm' => 1])->assertRedirect('/psx_trades');
+
+        $this->assertSame(1, \App\Models\PsxTradeItem::whereNotNull('buy_item_id')->count());
+        $r = app(PsxPortfolioService::class)->result();
+        $this->assertEquals(60, $r['matches'][0]['buy_price']);          // not FIFO's 50
+        $this->assertEquals(-2000, $r['matches'][0]['gross_pl']);
+        $this->assertEquals(50, array_values($r['holdings'])[0]['avg_price']);
+
+        // replacing again works with linked rows present
+        $res = $this->preview($this->sheet([['KEL', '2026-11-02', 9, 1000]]))->assertOk();
+        $this->post('/psx_trades/import/confirm', $this->token($res) + ['psx_broker_id' => 1, 'mode' => 'replace', 'confirm' => 1])->assertRedirect('/psx_trades');
+        $this->assertSame(1, \App\Models\PsxTradeItem::count());
+    }
 }

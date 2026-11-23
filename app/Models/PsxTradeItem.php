@@ -10,6 +10,7 @@ class PsxTradeItem extends Model
         'psx_trade_id',
         'type',
         'psx_stock_id',
+        'buy_item_id',
         'qty',
         'price',
         'value',
@@ -36,5 +37,11 @@ class PsxTradeItem extends Model
     public function stock()
     {
         return $this->belongsTo(PsxStock::class, 'psx_stock_id')->withTrashed();
+    }
+
+    /** The purchase this sale closes, when one was chosen. */
+    public function buyItem()
+    {
+        return $this->belongsTo(PsxTradeItem::class, 'buy_item_id');
     }
 }

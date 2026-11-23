@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\PsxBroker;
 use App\Models\PsxStock;
 use App\Models\PsxTrade;
+use App\Models\PsxTradeItem;
 use App\Services\Psx\PsxPortfolioService;
 use App\Services\Psx\TradeMatcher;
 use Illuminate\Http\Request;
@@ -100,8 +101,12 @@ class PsxTradeController extends Controller
                 'contract_note_no' => $data['contract_note_no'] ?? null,
                 'remarks'          => $data['remarks'] ?? null,
             ]);
-            $trade->items()->delete();
-            $trade->items()->createMany($data['items']);
+            // Update rows in place so their ids (and any "sold from" links to them) are kept
+            $existing = $trade->items()->orderBy('id')->get()->values();
+            foreach (array_values($data['items']) as $n => $row) {
+                isset($existing[$n]) ? $existing[$n]->update($row) : $trade->items()->create($row);
+            }
+            $existing->slice(count($data['items']))->each->delete();
 
             DB::commit();
             Log::info('[PSX] Trade updated', ['id' => $trade->id, 'user' => Auth::id()]);
@@ -141,9 +146,16 @@ class PsxTradeController extends Controller
     private function formData(?PsxTrade $trade): array
     {
         $holdings = [];
+        $lots = [];
         $rows = $this->portfolio->rows($trade ? [$trade->id] : []);
         foreach ((new TradeMatcher())->run($rows)['holdings'] as $group => $h) {
             $holdings[$group] = $h['qty'];
+            // purchases still held, for "Sold from"
+            $lots[$group] = array_values(array_map(fn ($l) => [
+                'id'    => (int) $l['key'],
+                'label' => $l['trade_no'] . ' · ' . date('d-M-Y', strtotime($l['date'])) . ' · '
+                    . number_format($l['qty_open']) . ' left of ' . number_format($l['qty_original']) . ' @ ' . rtrim(rtrim(number_format($l['price'], 4), '0'), '.'),
+            ], array_filter($h['lots'], fn ($l) => $l['key'] !== null)));
         }
 
         $items = old('items', $trade
@@ -154,6 +166,7 @@ class PsxTradeController extends Controller
                 'price'         => $i->price + 0,
                 'other_charges' => $i->other_charges + 0,
                 'remarks'       => $i->remarks,
+                'buy_item_id'   => $i->buy_item_id,
             ])->all()
             : []);
 
@@ -167,12 +180,13 @@ class PsxTradeController extends Controller
                 ->when($trade, fn ($q) => $q->orWhere('id', $trade->psx_broker_id))
                 ->orderByDesc('is_default')->orderBy('name')->get(),
             'holdings' => $holdings,
+            'lots'     => $lots,
         ];
     }
 
     private function showData($id): array
     {
-        $trade  = PsxTrade::with(['items.stock', 'broker', 'creator'])->findOrFail($id);
+        $trade  = PsxTrade::with(['items.stock', 'items.buyItem.trade', 'broker', 'creator'])->findOrFail($id);
         $result = $this->portfolio->result();
 
         // per row: commission actually charged (a buy sold the same day carries none)
@@ -207,6 +221,7 @@ class PsxTradeController extends Controller
             'items.*.price'         => 'required|numeric|gt:0',
             'items.*.other_charges' => 'nullable|numeric|min:0',
             'items.*.remarks'       => 'nullable|string|max:255',
+            'items.*.buy_item_id'   => 'nullable|integer|exists:psx_trade_items,id',
         ], [
             'items.required'                => 'Add at least one row.',
             'items.*.psx_stock_id.required' => 'Select a stock on every row.',
@@ -215,6 +230,24 @@ class PsxTradeController extends Controller
         ]);
 
         $matcher = TradeMatcher::fromBroker(PsxBroker::find($data['psx_broker_id']));
+
+        // "Sold from" must be a purchase of the same stock, at the same broker, on or before the sale date
+        $linkErrors = [];
+        foreach ($data['items'] as $i => $row) {
+            if (empty($row['buy_item_id'])) {
+                continue;
+            }
+            $buy = PsxTradeItem::with('trade')->find($row['buy_item_id']);
+            $ok = $row['type'] === 'sell' && $buy && $buy->type !== 'sell' && $buy->trade && !$buy->trade->trashed()
+                && $buy->psx_stock_id == $row['psx_stock_id'] && $buy->trade->psx_broker_id == $data['psx_broker_id']
+                && $buy->trade->trade_date->toDateString() <= date('Y-m-d', strtotime($data['trade_date']));
+            if (!$ok) {
+                $linkErrors["items.$i.buy_item_id"] = 'Row ' . ($i + 1) . ': "Sold from" must be an earlier purchase of the same stock at the same broker.';
+            }
+        }
+        if ($linkErrors) {
+            throw ValidationException::withMessages($linkErrors);
+        }
 
         $data['items'] = array_map(function ($row) use ($matcher) {
             $qty   = (float) $row['qty'];
@@ -233,6 +266,7 @@ class PsxTradeController extends Controller
                 'other_charges' => $other,
                 'net_amount'    => $row['type'] === 'sell' ? $value - $comm - $other : $value + $comm + $other,
                 'remarks'       => $row['remarks'] ?? null,
+                'buy_item_id'   => $row['type'] === 'sell' && !empty($row['buy_item_id']) ? (int) $row['buy_item_id'] : null,
             ];
         }, array_values($data['items']));
 
@@ -265,6 +299,7 @@ class PsxTradeController extends Controller
                 'qty'        => $item['qty'],
                 'price'      => $item['price'],
                 'commission' => $item['commission'],
+                'link'       => $item['buy_item_id'] ? (string) $item['buy_item_id'] : null,
             ];
         }
 

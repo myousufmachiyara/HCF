@@ -141,6 +141,11 @@
           <option value="{{ $s->id }}" data-symbol="{{ $s->symbol }}">{{ $s->symbol }}{{ $s->name ? ' - ' . $s->name : '' }}</option>
         @endforeach
       </select>
+      <div class="t-from-box mt-1" style="display:none">
+        <select class="form-control form-control-sm t-from" data-name="buy_item_id" aria-label="Sold from purchase">
+          <option value="">Sold from: auto (same day, then oldest)</option>
+        </select>
+      </div>
     </td>
     <td class="text-end t-holding text-muted">-</td>
     <td><input type="number" class="form-control t-qty" data-name="qty" min="1" step="any"></td>
@@ -158,6 +163,8 @@
   // Shares held now, excluding this trade: "brokerId|SYMBOL" => qty
   var HOLDINGS = @json((object) $holdings);
   var ITEMS = @json($items);
+  // Open purchases per "brokerId|SYMBOL" (excluding this trade), for "Sold from"
+  var LOTS = @json((object) $lots);
   var rowSeq = 0;
 
   function fmt(n) {
@@ -192,11 +199,27 @@
       row.find('.t-price').val(data.price);
       row.find('.t-other').val(data.other_charges || 0);
       row.find('.t-remarks').val(data.remarks || '');
+      row.find('.t-from').data('want', data.buy_item_id ? String(data.buy_item_id) : '');
     }
     $('#tradeRows').append(row);
     initStockSelect(row.find('.t-stock'));
+    fillFrom(row);
     recalc();
     return row;
+  }
+
+  // "Sold from": the purchases of this stock still held at the chosen broker
+  function fillFrom(row) {
+    var box = row.find('.t-from-box'), sel = row.find('.t-from');
+    var isSell = row.find('.t-type').val() === 'sell';
+    var sym = row.find('.t-stock option:selected').data('symbol');
+    var want = sel.val() || sel.data('want') || '';
+    var lots = (isSell && sym) ? (LOTS[$('#broker').val() + '|' + sym] || []) : [];
+    sel.find('option:not(:first)').remove();
+    lots.forEach(function (l) { sel.append($('<option>').val(String(l.id)).text('Sold from ' + l.label)); });
+    sel.val(lots.some(function (l) { return String(l.id) === want; }) ? want : '');
+    sel.data('want', want);
+    box.toggle(isSell && lots.length > 0);
   }
 
   // ── Stock dropdown: opens on Tab, type to search, Enter picks and jumps to Qty ──
@@ -349,6 +372,8 @@
       if ($('#tradeRows tr').length > 1) { $(this).closest('tr').remove(); recalc(); }
     });
     $('#tradeRows').on('change input', 'input, select', recalc);
+    $('#tradeRows').on('change', '.t-type, .t-stock', function () { fillFrom($(this).closest('tr')); });
+    $('#broker').on('change', function () { $('#tradeRows tr').each(function () { fillFrom($(this)); }); });
     $('#broker, #tradeDate').on('change', recalc);
 
     // Enter = next box; Enter on the last box of a row = new row (or next row); Ctrl+Enter / Ctrl+S = save

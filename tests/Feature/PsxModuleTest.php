@@ -218,12 +218,12 @@ class PsxModuleTest extends TestCase
         $html = $this->get('/reports/psx-dashboard?period=all')->assertOk()
             ->assertSee('Realised net P/L by selling day')->assertSee('Module summary')->getContent();
         $this->assertStringContainsString('Rs ' . number_format(abs($net)), $html);
-        $this->assertStringContainsString(count($r['matches']) . ' closed', $html);
+        $this->assertStringContainsString(\App\Services\Psx\TradeMatcher::summary($r['matches'])['trades'] . ' closed', $html);
 
         // custom range only counts sells inside it
         $inRange = array_filter($r['matches'], fn ($m) => $m['sell_date'] >= '2026-11-03' && $m['sell_date'] <= '2026-11-03');
         $this->get('/reports/psx-dashboard?period=custom&from_date=2026-11-03&to_date=2026-11-03')
-            ->assertSee(count($inRange) . ' closed');
+            ->assertSee(\App\Services\Psx\TradeMatcher::summary(array_values($inRange))['trades'] . ' closed');
 
         $u = User::factory()->create(['username' => 'nobody2']);
         $this->actingAs($u)->get('/reports/psx-dashboard')->assertForbidden();
@@ -311,5 +311,68 @@ class PsxModuleTest extends TestCase
         $this->assertEquals(9685, $m['net_pl']);
         $this->assertEquals(100.15, $m['buy_rate']);
         $pl->assertSee('Buy rate')->assertDontSee('Buy Comm.');
+    }
+
+    public function test_sold_from_a_chosen_purchase_and_links_survive_edits(): void
+    {
+        $this->trade('2026-11-02', [['buy', 'TRG', 1000, 50]]);                    // oldest
+        $this->trade('2026-11-03', [['buy', 'TRG', 1000, 60]]);
+        $second = \App\Models\PsxTradeItem::where('price', 60)->value('id');
+
+        // sale that names the 3 Nov purchase (FIFO would have used the 50 one)
+        $sell = fn ($link, $date = '2026-11-05', $stock = 'TRG', $broker = null) => $this->post('/psx_trades', [
+            'trade_date' => $date, 'psx_broker_id' => $broker ?? $this->broker()->id,
+            'items' => [['type' => 'sell', 'psx_stock_id' => $this->sid($stock), 'qty' => 1000, 'price' => 58, 'buy_item_id' => $link]],
+        ]);
+        $sell($second)->assertSessionHasNoErrors();
+        $m = app(PsxPortfolioService::class)->result()['matches'][0];
+        $this->assertEquals(60, $m['buy_price']);
+        $this->assertTrue($m['linked']);
+        $this->assertEquals(-2000, $m['gross_pl']);
+        $this->assertEquals(50, collect(app(PsxPortfolioService::class)->result()['holdings'])->first()['avg_price']);   // the 50 lot is still held
+        $sellTrade = PsxTrade::latest('id')->first();
+        $this->get("/psx_trades/{$sellTrade->id}")->assertSee('Sold from:')->assertSee('PSX-000002');
+
+        // the edit form lists open purchases and keeps the choice
+        $this->get("/psx_trades/{$sellTrade->id}/edit")->assertOk()->assertSee('"buy_item_id":' . $second, false)->assertSee('left of 1,000');
+
+        // edit the 3 Nov buy (price) -> its id is kept, so the sale stays linked to it
+        $buyTrade = PsxTrade::where('trade_no', 'PSX-000002')->first();
+        $this->put("/psx_trades/{$buyTrade->id}", ['trade_date' => '2026-11-03', 'psx_broker_id' => $this->broker()->id,
+            'items' => [['type' => 'buy', 'psx_stock_id' => $this->sid('TRG'), 'qty' => 1000, 'price' => 61]]])->assertSessionHasNoErrors();
+        $this->assertSame($second, \App\Models\PsxTradeItem::where('price', 61)->value('id'));
+        $this->assertEquals(61, app(PsxPortfolioService::class)->result()['matches'][0]['buy_price']);
+
+        // invalid choices are refused
+        $this->trade('2026-11-06', [['buy', 'KEL', 1000, 9]]);
+        $kel = \App\Models\PsxTradeItem::where('price', 9)->value('id');
+        $sell($kel)->assertSessionHasErrors('items.0.buy_item_id');                                   // other stock
+        $this->trade('2026-11-08', [['buy', 'TRG', 100, 70]]);
+        $sell(\App\Models\PsxTradeItem::where('price', 70)->value('id'), '2026-11-07')->assertSessionHasErrors('items.0.buy_item_id');   // bought later
+        $b2 = PsxBroker::create(['name' => 'Other', 'min_commission_per_share' => 0.05, 'commission_rate' => 0.15, 'is_active' => true]);
+        $sell($second, '2026-11-09', 'TRG', $b2->id)->assertSessionHasErrors('items.0.buy_item_id');   // other broker
+        $sell($sellTrade->items->first()->id)->assertSessionHasErrors('items.0.buy_item_id');          // a sale, not a purchase
+    }
+
+    public function test_summary_counts_one_trade_per_sale_and_break_even(): void
+    {
+        $this->trade('2026-11-02', [['buy', 'TRG', 1000, 50], ['buy', 'TRG', 1000, 52]]);
+        $this->trade('2026-11-03', [['sell', 'TRG', 1500, 55]]);                  // one sale, two purchases
+        $this->trade('2026-11-04', [['buy', 'KEL', 1000, 10]]);
+        $this->trade('2026-11-05', [['sell', 'KEL', 1000, 10.10]]);               // 100 gross - 50 - 50 = 0: break-even
+        $s = \App\Services\Psx\TradeMatcher::summary(app(PsxPortfolioService::class)->result()['matches']);
+        $this->assertSame(2, $s['trades']);
+        $this->assertSame(3, $s['matches']);
+        $this->assertSame([1, 0, 1], [$s['winning'], $s['losing'], $s['even']]);
+        $this->get('/reports/psx-profit-loss')->assertSee('1 / 0 / 1');
+        $this->get('/reports/psx-profit-loss?cols=excel')->assertOk()->assertSee('Purchase value')->assertSee('Gross P/L');
+
+        $c = $this->get('/reports/psx-commission?period=all&by=stock')->viewData('rows');
+        $kel = collect($c)->firstWhere('key', 'KEL');
+        $this->assertEquals(100, $kel['closed_comm']);
+        $this->assertEquals(100, $kel['gross_pl']);
+        $trg = collect($c)->firstWhere('key', 'TRG');
+        $this->assertEquals(75 + 78 * 0.5 + 123.75, $trg['closed_comm']);   // buy 50 lot full, half of the 52 lot, the sale
+        $this->assertEquals(75 + 78 + 123.75, $trg['total']);              // paid: both buys in full + the sale
     }
 }
