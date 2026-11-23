@@ -8,6 +8,7 @@ use App\Models\PsxTrade;
 use App\Support\DashboardPeriod;
 use Carbon\Carbon;
 use App\Services\Psx\PsxPortfolioService;
+use App\Services\Psx\PsxReportService;
 use App\Services\Psx\TradeMatcher;
 use Illuminate\Http\Request;
 
@@ -116,31 +117,92 @@ class PsxReportController extends Controller
         ]);
     }
 
-    public function holdings(Request $request)
+    /** Open positions as of a date: one line per stock (or per stock and broker) with the purchases behind it. */
+    public function holdings(Request $request, PsxReportService $reports)
     {
         $brokerId = $request->integer('broker_id') ?: null;
         $symbol   = $request->input('symbol');
+        $asOf     = $request->input('as_of') ?: Carbon::today()->toDateString();
+        $merge    = $request->input('view', 'stock') !== 'broker';
 
-        $holdings = array_filter(
-            $this->portfolio->result($brokerId)['holdings'],
+        $positions = array_values(array_filter(
+            $reports->positions($asOf, $brokerId, $merge),
             fn ($h) => !$symbol || $h['symbol'] === $symbol
-        );
+        ));
 
         $names = PsxStock::withTrashed()->pluck('name', 'symbol');
-        foreach ($holdings as &$h) {
+        foreach ($positions as &$h) {
             $h['stock_name'] = $names[$h['symbol']] ?? null;
         }
         unset($h);
 
+        if ($request->input('export') === 'csv') {
+            return response()->streamDownload(function () use ($positions, $merge) {
+                $out = fopen('php://output', 'w');
+                fputcsv($out, ['Stock', 'Company', $merge ? 'Brokers' : 'Broker', 'Shares held', 'Avg buy price', 'Avg cost incl. commission',
+                    'Value at buy price', 'Commission', 'Cost incl. commission', 'Held since', 'Purchases']);
+                foreach ($positions as $h) {
+                    fputcsv($out, [$h['symbol'], $h['stock_name'], $h['broker'], $h['qty'], round($h['avg_price'], 4), round($h['avg_cost'], 4),
+                        $h['price_value'], $h['commission'], $h['cost_value'], $h['since'], count($h['lots'])]);
+                }
+                fclose($out);
+            }, 'psx-open-positions-' . $asOf . '.csv', ['Content-Type' => 'text/csv']);
+        }
+
         return view('psx.reports.holdings', [
-            'holdings' => $holdings,
+            'holdings' => $positions,
             'totals'   => [
-                'cost'       => array_sum(array_column($holdings, 'cost_value')),
-                'commission' => array_sum(array_column($holdings, 'commission')),
+                'qty'        => array_sum(array_column($positions, 'qty')),
+                'value'      => array_sum(array_column($positions, 'price_value')),
+                'commission' => array_sum(array_column($positions, 'commission')),
+                'cost'       => array_sum(array_column($positions, 'cost_value')),
+                'lots'       => array_sum(array_map(fn ($h) => count($h['lots']), $positions)),
             ],
             'brokers'  => PsxBroker::orderBy('name')->get(['id', 'name']),
             'symbols'  => PsxStock::orderBy('symbol')->pluck('symbol'),
-            'filters'  => ['broker_id' => $brokerId, 'symbol' => $symbol],
+            'filters'  => ['broker_id' => $brokerId, 'symbol' => $symbol, 'as_of' => $asOf, 'view' => $merge ? 'stock' : 'broker'],
+        ]);
+    }
+
+    /** Per stock for a period: opening, bought, sold, closing (costs incl. commission). */
+    public function movement(Request $request, PsxReportService $reports)
+    {
+        $brokerId = $request->integer('broker_id') ?: null;
+        $period   = $request->input('period', 'month');
+        [$from, $to] = DashboardPeriod::range($period, $request->input('from_date'), $request->input('to_date'));
+        $to = $to ?: Carbon::today()->toDateString();
+
+        $data = $reports->movement($from, $to, $brokerId);
+        if ($symbol = $request->input('symbol')) {
+            $data['rows'] = array_values(array_filter($data['rows'], fn ($r) => $r['symbol'] === $symbol));
+        }
+        if (!$request->boolean('all')) {   // hide stocks with no position and no activity
+            $data['rows'] = array_values(array_filter($data['rows'], fn ($r) => $r['open_qty'] || $r['buy_qty'] || $r['sell_qty'] || $r['close_qty']));
+        }
+        foreach (['open_cost', 'buy_cost', 'sold_cost', 'proceeds', 'net_pl', 'close_cost'] as $k) {
+            $data['totals'][$k] = array_sum(array_column($data['rows'], $k));
+        }
+
+        return view('psx.reports.movement', $data + [
+            'brokers' => PsxBroker::orderBy('name')->get(['id', 'name']),
+            'symbols' => PsxStock::orderBy('symbol')->pluck('symbol'),
+            'filters' => ['period' => $period, 'from' => $from, 'to' => $to, 'broker_id' => $brokerId, 'symbol' => $symbol],
+            'label'   => DashboardPeriod::label($period, $from, $to),
+        ]);
+    }
+
+    /** Commission paid by month / day / stock / broker, next to realised net P/L. */
+    public function commission(Request $request, PsxReportService $reports)
+    {
+        $brokerId = $request->integer('broker_id') ?: null;
+        $period   = $request->input('period', 'year');
+        $by       = in_array($request->input('by'), ['month', 'day', 'stock', 'broker']) ? $request->input('by') : 'month';
+        [$from, $to] = DashboardPeriod::range($period, $request->input('from_date'), $request->input('to_date'));
+
+        return view('psx.reports.commission', $reports->commission($from, $to, $brokerId, $by) + [
+            'brokers' => PsxBroker::orderBy('name')->get(['id', 'name']),
+            'filters' => ['period' => $period, 'from' => $from, 'to' => $to, 'broker_id' => $brokerId, 'by' => $by],
+            'label'   => DashboardPeriod::label($period, $from, $to),
         ]);
     }
 
@@ -186,7 +248,7 @@ class PsxReportController extends Controller
 
     private function csv(array $matches)
     {
-        $headers = ['Stock', 'Broker', 'Purchase Date', 'Purchase Price', 'Selling Date', 'Selling Price', 'Matched Qty',
+        $headers = ['Stock', 'Broker', 'Purchase Date', 'Purchase Price', 'Cost incl. Commission', 'Selling Date', 'Selling Price', 'Proceeds after Commission', 'Matched Qty',
             'Purchase Value', 'Selling Value', 'Buy Commission', 'Sell Commission', 'Total Commission',
             'Gross P/L', 'Net P/L', 'Net P/L %', 'Type', 'Buy Trade #', 'Sell Trade #'];
 
@@ -195,7 +257,7 @@ class PsxReportController extends Controller
             fputcsv($out, $headers);
             foreach ($matches as $m) {
                 fputcsv($out, [
-                    $m['symbol'], $m['broker'], $m['buy_date'], $m['buy_price'], $m['sell_date'], $m['sell_price'], $m['qty'],
+                    $m['symbol'], $m['broker'], $m['buy_date'], $m['buy_price'], $m['buy_cost'], $m['sell_date'], $m['sell_price'], $m['sell_proceeds'], $m['qty'],
                     $m['purchase_value'], $m['selling_value'], $m['buy_commission'], $m['sell_commission'],
                     $m['total_commission'], $m['gross_pl'], $m['net_pl'], $m['net_pl_percent'],
                     $m['is_intraday'] ? 'Intraday' : ($m['buy_type'] === 'opening' ? 'Opening' : 'Delivery'),

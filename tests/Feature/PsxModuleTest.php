@@ -79,7 +79,8 @@ class PsxModuleTest extends TestCase
         $this->assertEquals(7500, $m2['gross_pl']);
         $this->assertEquals(112.5, $m2['buy_commission']);           // 150 x 1500/2000
         $h = array_values($r['holdings']);
-        $this->assertCount(1, $h);  $this->assertEquals(500, $h[0]['qty']);  $this->assertEquals(50, $h[0]['avg_cost']);
+        $this->assertCount(1, $h);  $this->assertEquals(500, $h[0]['qty']);  $this->assertEquals(50, $h[0]['avg_price']);
+        $this->assertEquals(50.075, $h[0]['avg_cost']);                   // 50 + 150 commission x 500/2000 / 500
 
         $this->get('/psx_trades/2')->assertOk()->assertSee('Profit / loss on sales');
     }
@@ -226,5 +227,89 @@ class PsxModuleTest extends TestCase
 
         $u = User::factory()->create(['username' => 'nobody2']);
         $this->actingAs($u)->get('/reports/psx-dashboard')->assertForbidden();
+    }
+
+    public function test_open_positions_merge_purchases_with_commission_and_as_of_date(): void
+    {
+        // TRG bought 3 times (two brokers), part sold
+        $b2 = PsxBroker::create(['name' => 'Second', 'min_commission_per_share' => 0.05, 'commission_rate' => 0.15, 'is_active' => true]);
+        $this->trade('2026-11-02', [['buy', 'TRG', 1000, 50]]);              // comm 75
+        $this->trade('2026-11-03', [['buy', 'TRG', 2000, 52]]);              // comm 156
+        $this->trade('2026-11-03', [['buy', 'TRG', 500, 60]], $b2->id);      // comm 45
+        $this->trade('2026-11-05', [['sell', 'TRG', 1000, 55]]);             // sells the 2 Nov lot
+
+        $res = $this->get('/reports/psx-holdings?as_of=2026-11-20')->assertOk();
+        $h = collect($res->viewData('holdings'))->firstWhere('symbol', 'TRG');
+        $this->assertEquals(2500, $h['qty']);
+        $this->assertEquals(2000 * 52 + 500 * 60 + 156 + 45, $h['cost_value']);      // 134,201
+        $this->assertEqualsWithDelta(134201 / 2500, $h['avg_cost'], 0.00001);        // 53.6804
+        $this->assertEquals((2000 * 52 + 500 * 60) / 2500, $h['avg_price']);
+        $this->assertCount(2, $h['lots']);
+        $this->assertSame('Default Broker, Second', $h['broker']);
+
+        // per broker
+        $this->assertCount(2, collect($this->get('/reports/psx-holdings?as_of=2026-11-20&view=broker')->viewData('holdings'))->where('symbol', 'TRG'));
+
+        // as of 4 Nov the sale has not happened yet
+        $h = collect($this->get('/reports/psx-holdings?as_of=2026-11-04')->viewData('holdings'))->firstWhere('symbol', 'TRG');
+        $this->assertEquals(3500, $h['qty']);
+        $this->assertEquals(50000 + 104000 + 30000 + 75 + 156 + 45, $h['cost_value']);
+
+        // before any trade
+        $this->get('/reports/psx-holdings?as_of=2026-11-01')->assertSee('No open positions on this date.');
+
+        $csv = $this->get('/reports/psx-holdings?as_of=2026-11-20&export=csv')->streamedContent();
+        $this->assertStringContainsString('TRG,"TRG Pakistan Ltd","Default Broker, Second",2500,53.6,53.6804,134000,201,134201', $csv);
+    }
+
+    public function test_movement_opening_plus_bought_minus_sold_equals_closing(): void
+    {
+        $this->seed(PsxSampleTradesSeeder::class);
+        foreach ([['2026-11-01', '2026-11-11'], ['2026-10-20', '2026-10-31'], ['2026-11-05', '2026-11-05']] as [$from, $to]) {
+            $res = $this->get("/reports/psx-movement?period=custom&from_date=$from&to_date=$to&all=1")->assertOk();
+            $rows = $res->viewData('rows');
+            $this->assertNotEmpty($rows);
+            foreach ($rows as $r) {
+                $this->assertEqualsWithDelta($r['close_cost'], $r['open_cost'] + $r['buy_cost'] - $r['sold_cost'], 0.05, "{$r['symbol']} $from-$to cost");
+                $this->assertEqualsWithDelta($r['close_qty'], $r['open_qty'] + $r['buy_qty'] - $r['sell_qty'], 0.0001, "{$r['symbol']} $from-$to qty");
+                $this->assertEqualsWithDelta($r['net_pl'], $r['proceeds'] - $r['sold_cost'], 0.05, "{$r['symbol']} P/L");
+            }
+            // closing = open positions on the end date
+            $pos = collect($this->get("/reports/psx-holdings?as_of=$to")->viewData('holdings'));
+            $this->assertEqualsWithDelta($pos->sum('cost_value'), array_sum(array_column($rows, 'close_cost')), 0.05);
+        }
+        // opening balance entry (CNERGY 11 Oct) shows up in a period that includes it
+        $r = collect($this->get('/reports/psx-movement?period=custom&from_date=2026-10-01&to_date=2026-10-31')->viewData('rows'))->firstWhere('symbol', 'CNERGY');
+        $this->assertEquals(2000, $r['opening_entries']);
+        $this->get('/reports/psx-movement?period=custom&from_date=2026-10-01&to_date=2026-10-31')->assertSee('incl. 2,000 opening balance');
+        // and as opening position for a later period
+        $r = collect($this->get('/reports/psx-movement?period=custom&from_date=2026-10-12&to_date=2026-11-30')->viewData('rows'))->firstWhere('symbol', 'CNERGY');
+        $this->assertEquals(2000, $r['open_qty']);
+    }
+
+    public function test_commission_report_and_net_profit_loss(): void
+    {
+        $this->trade('2026-10-10', [['buy', 'TRG', 1000, 100]]);                         // 150
+        $this->trade('2026-11-10', [['buy', 'KEL', 1000, 9], ['sell', 'KEL', 1000, 9.10]]); // buy 0 (same day), sell 50
+        $this->trade('2026-11-12', [['sell', 'TRG', 1000, 110]]);                        // 165
+
+        $res = $this->get('/reports/psx-commission?period=all&by=month')->assertOk();
+        $rows = collect($res->viewData('rows'))->keyBy('key');
+        $this->assertEquals(150, $rows['2026-10']['total']);
+        $this->assertEquals(215, $rows['2026-11']['total']);
+        $this->assertEquals(50, $rows['2026-11']['saved']);
+        $this->assertEquals(50 + (10000 - 150 - 165), $rows['2026-11']['net_pl']);   // KEL 50 + TRG 9,685
+        $this->assertEquals(365, $res->viewData('totals')['total']);
+        $this->assertSame(['KEL', 'TRG'], array_column($this->get('/reports/psx-commission?period=all&by=stock')->viewData('rows'), 'key'));
+        $this->get('/reports/psx-commission?period=all&by=day')->assertOk()->assertSee('10 Nov 2026');
+
+        // P/L is net: cost incl. commission, proceeds after commission
+        $pl = $this->get('/reports/psx-profit-loss?symbol=TRG')->assertOk();
+        $m = $pl->viewData('matches')[0];
+        $this->assertEquals(100150, $m['buy_cost']);
+        $this->assertEquals(109835, $m['sell_proceeds']);
+        $this->assertEquals(9685, $m['net_pl']);
+        $this->assertEquals(100.15, $m['buy_rate']);
+        $pl->assertSee('Buy rate')->assertDontSee('Buy Comm.');
     }
 }

@@ -15,8 +15,9 @@ class PsxPortfolioService
      *
      * @param array $excludeTradeIds trade headers to leave out (e.g. the one being edited)
      * @param int|null $brokerId     only this broker's trades
+     * @param string|null $upTo      only trades on or before this date (Y-m-d)
      */
-    public function rows(array $excludeTradeIds = [], ?int $brokerId = null): array
+    public function rows(array $excludeTradeIds = [], ?int $brokerId = null, ?string $upTo = null): array
     {
         $items = PsxTradeItem::query()
             ->join('psx_trades', 'psx_trades.id', '=', 'psx_trade_items.psx_trade_id')
@@ -25,6 +26,7 @@ class PsxPortfolioService
             ->whereNull('psx_trades.deleted_at')
             ->when($excludeTradeIds, fn ($q) => $q->whereNotIn('psx_trades.id', $excludeTradeIds))
             ->when($brokerId, fn ($q) => $q->where('psx_trades.psx_broker_id', $brokerId))
+            ->when($upTo, fn ($q) => $q->whereDate('psx_trades.trade_date', '<=', $upTo))
             ->orderBy('psx_trades.trade_date')
             ->orderBy('psx_trades.id')
             ->orderBy('psx_trade_items.id')
@@ -59,8 +61,8 @@ class PsxPortfolioService
         ])->all();
     }
 
-    public function result(?int $brokerId = null): array
+    public function result(?int $brokerId = null, ?string $upTo = null): array
     {
-        return (new TradeMatcher())->run($this->rows([], $brokerId));
+        return (new TradeMatcher())->run($this->rows([], $brokerId, $upTo));
     }
 }

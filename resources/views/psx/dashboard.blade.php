@@ -108,7 +108,7 @@
     </div>
     <div>
       <section class="card kpi"><div class="card-body">
-        <div class="kpi-label">Invested now (at cost)</div>
+        <div class="kpi-label">Invested now (cost incl. commission)</div>
         <div class="kpi-value">{{ $money($portfolio['cost']) }}</div>
         <div class="kpi-sub">{{ $portfolio['stocks'] }} {{ \Illuminate\Support\Str::plural('stock', $portfolio['stocks']) }} held · all dates</div>
       </div></section>
@@ -224,16 +224,16 @@
 
   {{-- HOLDINGS --}}
   <div class="section-title">
-    <h3>Holdings <small class="text-muted fw-normal">· current, all dates</small></h3>
+    <h3>Open positions <small class="text-muted fw-normal">· today, all dates</small></h3>
     @can('reports.psx_holdings')
-    <a href="{{ route('reports.psx_holdings', array_filter(['broker_id' => $filters['broker_id']])) }}">Open Holdings <i class="fas fa-arrow-right"></i></a>
+    <a href="{{ route('reports.psx_holdings', array_filter(['broker_id' => $filters['broker_id']])) }}">Open Positions report <i class="fas fa-arrow-right"></i></a>
     @endcan
   </div>
   <div class="row g-3">
     <div class="col-xl-8">
       <section class="card h-100">
         <header class="card-header has-legend">
-          <h2 class="card-title">Where the money is invested (at cost)</h2>
+          <h2 class="card-title">Where the money is invested (cost incl. commission)</h2>
           @if (count($allocation) && str_starts_with(end($allocation)['symbol'], 'Other'))
             <div class="legend"><span><i style="background:var(--pos)"></i>Stock</span><span><i style="background:var(--other)"></i>Other stocks combined</span></div>
           @endif
@@ -265,13 +265,13 @@
           <table class="table table-sm mb-0">
             <tr><td>Stocks held</td><td class="num">{{ $portfolio['stocks'] }}</td></tr>
             <tr><td>Open lots</td><td class="num">{{ $portfolio['lots'] }}</td></tr>
-            <tr><td>Invested at cost</td><td class="num">{{ $money($portfolio['cost'], 2) }}</td></tr>
+            <tr><td>Cost incl. commission</td><td class="num">{{ $money($portfolio['cost'], 2) }}</td></tr>
             @if (count($allocation))
               <tr><td>Largest holding</td><td class="num">{{ $allocation[0]['symbol'] }} · {{ $portfolio['cost'] ? number_format($allocation[0]['cost'] / $portfolio['cost'] * 100, 1) : 0 }}%</td></tr>
             @endif
             <tr><td>Realised net P/L, all time</td><td class="num">{!! $arrow($modules['all_net']) !!} {{ $signed($modules['all_net']) }}</td></tr>
           </table>
-          <p class="small text-muted mt-3 mb-0">Market value and unrealised P/L are on the Holdings screen, where you enter today's prices.</p>
+          <p class="small text-muted mt-3 mb-0">Market value and unrealised P/L are on the Open Positions report, where you enter today's prices.</p>
         </div>
       </section>
     </div>
@@ -329,7 +329,7 @@
       $def  = $modules['default'];
       $cards = [
         ['psx_trades.index',     'psx_trades.index',     'fa-exchange-alt', 'Trades',          number_format($modules['trades']) . ' trades',              'Last trade ' . $last],
-        ['reports.psx_holdings', 'reports.psx_holdings', 'fa-briefcase',    'Holdings',        $portfolio['stocks'] . ' stocks',                           $money($portfolio['cost']) . ' at cost'],
+        ['reports.psx_holdings', 'reports.psx_holdings', 'fa-briefcase',    'Open positions',        $portfolio['stocks'] . ' stocks',                           $money($portfolio['cost']) . ' cost incl. commission'],
         ['reports.psx_pl',       'reports.psx_pl',       'fa-chart-line',   'Profit & Loss',   $signed($modules['all_net']),                               'Realised, all time'],
         ['psx_stocks.index',     'psx_stocks.index',     'fa-tags',         'Stocks',          $modules['stocks_live'] . ' active',                        $modules['stocks'] . ' in the list'],
         ['psx_brokers.index',    'psx_brokers.index',    'fa-handshake',    'Brokers',         $modules['brokers'] . ' active',                            $def ? 'Default: ' . $def->name . ' · Rs ' . rtrim(rtrim(number_format($def->min_commission_per_share, 4), '0'), '.') . '/share or ' . rtrim(rtrim(number_format($def->commission_rate, 4), '0'), '.') . '%' : 'No default broker'],

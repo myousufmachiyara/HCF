@@ -442,7 +442,7 @@
     if ($inv) $cards[] = ['products.index', route('products.index'), 'fa-boxes', 'Products', number_format($inv['active']) . ' active', $inv['in_stock'] . ' in stock · ' . count($inv['out_of_stock']) . ' out of stock'];
     if ($a) $cards[] = ['coa.index', route('coa.index'), 'fa-book', 'Chart of accounts', number_format($a['coa']) . ' accounts', 'Receivable ' . $money($a['receivables']) . ' · payable ' . $money($a['payables'])];
     if (isset($vouchers)) $cards[] = ['vouchers.index', route('vouchers.index', 'journal'), 'fa-file-invoice', 'Vouchers', number_format($vouchers->sum('n')) . ' vouchers', collect(['journal', 'payment', 'receipt'])->map(fn ($t) => ucfirst($t) . ' ' . ($vouchers[$t]->n ?? 0))->implode(' · ')];
-    if (isset($psx)) $cards[] = ['reports.psx_dashboard', route('reports.psx_dashboard', $filters['period'] === 'custom' ? ['period' => 'custom', 'from_date' => $filters['from'], 'to_date' => $filters['to']] : ['period' => $filters['period']]), 'fa-chart-line', 'PSX Trading', $signed($psx['net']) . ' realised', $psx['stocks'] . ' stocks held · ' . $money($psx['invested']) . ' at cost'];
+    if (isset($psx)) $cards[] = ['reports.psx_dashboard', route('reports.psx_dashboard', $filters['period'] === 'custom' ? ['period' => 'custom', 'from_date' => $filters['from'], 'to_date' => $filters['to']] : ['period' => $filters['period']]), 'fa-chart-line', 'PSX Trading', $signed($psx['net']) . ' realised', $psx['stocks'] . ' stocks held · ' . $money($psx['invested']) . ' cost'];
   @endphp
   <div class="tiles mb-3">
     @foreach ($cards as [$perm, $url, $icon, $title, $figure, $meta])

@@ -42,9 +42,15 @@
     <section class="card">
       <header class="card-header d-flex justify-content-between align-items-center">
         <h2 class="card-title">All Trades</h2>
-        @can('psx_trades.create')
-        <a href="{{ route('psx_trades.create') }}" class="btn btn-primary"><i class="fas fa-plus"></i> New Trade</a>
-        @endcan
+        <div>
+          @can('psx_trades.import')
+          <a href="{{ route('psx_trades.import') }}" class="btn btn-default"><i class="fas fa-file-excel"></i> Import Excel</a>
+          @endcan
+          <a href="{{ route('psx_trades.export') }}" class="btn btn-default"><i class="fas fa-download"></i> Export CSV</a>
+          @can('psx_trades.create')
+          <a href="{{ route('psx_trades.create') }}" class="btn btn-primary"><i class="fas fa-plus"></i> New Trade</a>
+          @endcan
+        </div>
       </header>
 
       <div class="card-body">

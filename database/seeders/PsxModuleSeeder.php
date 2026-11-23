@@ -27,9 +27,12 @@ class PsxModuleSeeder extends Seeder
                 $names[] = "$module.$action";
             }
         }
+        $names[] = 'psx_trades.import';
         $names[] = 'reports.psx_dashboard';
         $names[] = 'reports.psx_holdings';
         $names[] = 'reports.psx_pl';
+        $names[] = 'reports.psx_movement';
+        $names[] = 'reports.psx_commission';
 
         foreach ($names as $name) {
             Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);

@@ -150,7 +150,7 @@
           @endif
 
           {{-- PSX Trading --}}
-          @if(auth()->user()->can('reports.psx_dashboard') || auth()->user()->can('psx_trades.index') || auth()->user()->can('psx_stocks.index') || auth()->user()->can('psx_brokers.index') || auth()->user()->can('reports.psx_holdings') || auth()->user()->can('reports.psx_pl'))
+          @if(auth()->user()->can('reports.psx_dashboard') || auth()->user()->can('psx_trades.index') || auth()->user()->can('psx_trades.import') || auth()->user()->can('psx_stocks.index') || auth()->user()->can('psx_brokers.index'))
           <li class="nav-parent">
             <a class="nav-link" href="#"><i class="fa fa-chart-line"></i> <span>PSX Trading</span></a>
             <ul class="nav nav-children">
@@ -160,17 +160,35 @@
               @can('psx_trades.index')
                 <li><a class="nav-link" href="{{ route('psx_trades.index') }}">Trades</a></li>
               @endcan
-              @can('reports.psx_holdings')
-                <li><a class="nav-link" href="{{ route('reports.psx_holdings') }}">Holdings</a></li>
-              @endcan
-              @can('reports.psx_pl')
-                <li><a class="nav-link" href="{{ route('reports.psx_pl') }}">Profit &amp; Loss</a></li>
+              @can('psx_trades.import')
+                <li><a class="nav-link" href="{{ route('psx_trades.import') }}">Import Excel</a></li>
               @endcan
               @can('psx_stocks.index')
                 <li><a class="nav-link" href="{{ route('psx_stocks.index') }}">Stocks</a></li>
               @endcan
               @can('psx_brokers.index')
                 <li><a class="nav-link" href="{{ route('psx_brokers.index') }}">Brokers &amp; Commission</a></li>
+              @endcan
+            </ul>
+          </li>
+          @endif
+
+          {{-- PSX Reports --}}
+          @if(auth()->user()->can('reports.psx_holdings') || auth()->user()->can('reports.psx_movement') || auth()->user()->can('reports.psx_pl') || auth()->user()->can('reports.psx_commission'))
+          <li class="nav-parent">
+            <a class="nav-link" href="#"><i class="fa fa-file-invoice-dollar"></i> <span>PSX Reports</span></a>
+            <ul class="nav nav-children">
+              @can('reports.psx_holdings')
+                <li><a class="nav-link" href="{{ route('reports.psx_holdings') }}">Open Positions</a></li>
+              @endcan
+              @can('reports.psx_movement')
+                <li><a class="nav-link" href="{{ route('reports.psx_movement') }}">Stock Movement</a></li>
+              @endcan
+              @can('reports.psx_pl')
+                <li><a class="nav-link" href="{{ route('reports.psx_pl') }}">Profit &amp; Loss</a></li>
+              @endcan
+              @can('reports.psx_commission')
+                <li><a class="nav-link" href="{{ route('reports.psx_commission') }}">Commission</a></li>
               @endcan
             </ul>
           </li>

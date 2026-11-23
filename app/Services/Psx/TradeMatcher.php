@@ -155,7 +155,12 @@ class TradeMatcher
                     'total_commission' => round($totalComm, 2),
                     'gross_pl'         => round($gross, 2),
                     'net_pl'           => round($net, 2),
-                    'net_pl_percent'   => $purchaseValue > 0 ? round($net / $purchaseValue * 100, 2) : null,
+                    'net_pl_percent'   => $purchaseValue > 0 ? round($net / ($purchaseValue + $buyCharged) * 100, 2) : null,
+                    // cost incl. buy commission, proceeds after sell commission (net P/L = proceeds - cost)
+                    'buy_cost'         => round($purchaseValue + $buyCharged, 2),
+                    'sell_proceeds'    => round($sellingValue - $sellComm, 2),
+                    'buy_rate'         => $qty > 0 ? ($purchaseValue + $buyCharged) / $qty : 0,
+                    'sell_rate'        => $qty > 0 ? ($sellingValue - $sellComm) / $qty : 0,
                     'is_intraday'      => $intraday,
                     'holding_days'     => (int) round((strtotime($t['date']) - strtotime($lot['date'])) / 86400),
                 ];
@@ -218,21 +223,32 @@ class TradeMatcher
                 continue;
             }
 
-            $qty  = array_sum(array_column($open, 'qty_open'));
-            $cost = array_sum(array_map(fn ($l) => $l['qty_open'] * $l['price'], $open));
-            $comm = array_sum(array_map(fn ($l) => $l['commission'] * $l['qty_open'] / $l['qty_original'], $open));
+            foreach ($open as &$l) {
+                // commission still sitting in the shares not yet sold (none is waived on an open lot)
+                $l['commission_open'] = round($l['commission'] * $l['qty_open'] / $l['qty_original'], 2);
+                $l['cost']            = round($l['qty_open'] * $l['price'] + $l['commission_open'], 2);
+                $l['rate']            = $l['cost'] / $l['qty_open'];
+            }
+            unset($l);
+
+            $qty   = array_sum(array_column($open, 'qty_open'));
+            $value = array_sum(array_map(fn ($l) => $l['qty_open'] * $l['price'], $open));
+            $comm  = array_sum(array_column($open, 'commission_open'));
 
             $holdings[$group] = [
-                'group'      => $group,
-                'symbol'     => $open[0]['symbol'],
-                'broker'     => $open[0]['broker'],
-                'qty'        => $qty,
-                'avg_cost'   => $qty > 0 ? $cost / $qty : 0,
-                'cost_value' => round($cost, 2),
-                'commission' => round($comm, 2),
-                'since'      => $open[0]['date'],
-                'last_price' => end($open)['price'],
-                'lots'       => $open,
+                'group'       => $group,
+                'symbol'      => $open[0]['symbol'],
+                'broker'      => $open[0]['broker'],
+                'qty'         => $qty,
+                'avg_price'   => $qty > 0 ? $value / $qty : 0,            // average buy price, before commission
+                'avg_cost'    => $qty > 0 ? ($value + $comm) / $qty : 0,  // average cost per share incl. commission
+                'price_value' => round($value, 2),                         // qty x buy price
+                'commission'  => round($comm, 2),
+                'cost_value'  => round($value + $comm, 2),                 // cost incl. commission
+                'since'       => $open[0]['date'],
+                'last_date'   => end($open)['date'],
+                'last_price'  => end($open)['price'],
+                'lots'        => $open,
             ];
         }
 
@@ -251,6 +267,8 @@ class TradeMatcher
             'turnover'   => array_sum(array_column($matches, 'selling_value')),
             'gross'      => array_sum(array_column($matches, 'gross_pl')),
             'commission' => array_sum(array_column($matches, 'total_commission')),
+            'cost'       => array_sum(array_column($matches, 'buy_cost')),
+            'proceeds'   => array_sum(array_column($matches, 'sell_proceeds')),
             'waived'     => array_sum(array_column($matches, 'buy_waived')),
             'net'        => array_sum($net),
             'winning'    => count(array_filter($net, fn ($v) => $v > 0)),

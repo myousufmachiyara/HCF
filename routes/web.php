@@ -27,6 +27,7 @@ use App\Http\Controllers\{
     PsxBrokerController,
     PsxTradeController,
     PsxReportController,
+    PsxImportController,
 };
 
 Auth::routes();
@@ -81,6 +82,12 @@ Route::middleware(['auth'])->group(function () {
         'psx_trades' => ['controller' => PsxTradeController::class, 'permission' => 'psx_trades'],
     ];
 
+    // PSX Trades: Excel import / backup export (before the module routes, so "import" is not read as a trade id)
+    Route::get('psx_trades/import', [PsxImportController::class, 'form'])->middleware('check.permission:psx_trades.import')->name('psx_trades.import');
+    Route::post('psx_trades/import/preview', [PsxImportController::class, 'preview'])->middleware('check.permission:psx_trades.import')->name('psx_trades.import.preview');
+    Route::post('psx_trades/import/confirm', [PsxImportController::class, 'confirm'])->middleware('check.permission:psx_trades.import')->name('psx_trades.import.confirm');
+    Route::get('psx_trades/export', [PsxImportController::class, 'export'])->middleware('check.permission:psx_trades.index')->name('psx_trades.export');
+
     foreach ($modules as $uri => $config) {
         $controller = $config['controller'];
         $permission = $config['permission'];
@@ -125,6 +132,8 @@ Route::middleware(['auth'])->group(function () {
         Route::get('sale', [SalesReportController::class, 'saleReports'])->name('sale');
         Route::get('accounts', [AccountsReportController::class, 'accounts'])->name('accounts');
         Route::get('psx-dashboard', [PsxReportController::class, 'dashboard'])->middleware('check.permission:reports.psx_dashboard')->name('psx_dashboard');
+        Route::get('psx-movement', [PsxReportController::class, 'movement'])->middleware('check.permission:reports.psx_movement')->name('psx_movement');
+        Route::get('psx-commission', [PsxReportController::class, 'commission'])->middleware('check.permission:reports.psx_commission')->name('psx_commission');
         Route::get('psx-holdings', [PsxReportController::class, 'holdings'])->middleware('check.permission:reports.psx_holdings')->name('psx_holdings');
         Route::get('psx-profit-loss', [PsxReportController::class, 'profitLoss'])->middleware('check.permission:reports.psx_pl')->name('psx_pl');
     });
